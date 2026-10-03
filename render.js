@@ -44,29 +44,90 @@ window.QL = window.QL || {};
     });
   };
 
-  /* ---------- {열이름} 치환 ---------- */
-  QL.resolve = function (tpl, row, headers) {
+  /* ---------- {열이름} 치환 + 내장 변수 + 필터 ----------
+     {품명}          데이터 열
+     {2}             열 번호
+     {일련번호}      출력 순서 1,2,3…   {일련번호:0001} 0001 부터 4자리
+     {행번호}        데이터 행 번호 (수량만큼 반복돼도 같은 행은 같은 번호)
+     {오늘} {오늘:YY.MM.DD}   {시간} {시간:HH:mm}
+     {바코드|ean13}  체크디지트 자동 계산해 붙이기
+     {코드|숫자} {코드|대문자} {코드|소문자}                                   */
+  function pad2(n) { return (n < 10 ? '0' : '') + n; }
+  function fmtDate(pat) {
+    var d = new Date();
+    var map = {
+      YYYY: String(d.getFullYear()), YY: String(d.getFullYear()).slice(2),
+      MM: pad2(d.getMonth() + 1), DD: pad2(d.getDate()),
+      HH: pad2(d.getHours()), mm: pad2(d.getMinutes()), ss: pad2(d.getSeconds())
+    };
+    return String(pat).replace(/YYYY|YY|MM|DD|HH|mm|ss/g, function (t) { return map[t]; });
+  }
+  /* EAN/UPC 체크디지트 — 오른쪽부터 3,1,3,1… 가중합 */
+  QL.eanCheck = function (digits) {
+    var sum = 0, n = digits.length;
+    for (var i = 0; i < n; i++) sum += (+digits[n - 1 - i]) * (i % 2 === 0 ? 3 : 1);
+    return String((10 - sum % 10) % 10);
+  };
+
+  QL.resolve = function (tpl, row, headers, ctx) {
     if (tpl == null) return '';
-    return String(tpl).replace(/\{([^{}]*)\}/g, function (m, key) {
-      key = key.trim();
-      if (key === '') return m;
-      var i = headers ? headers.indexOf(key) : -1;
-      if (i < 0 && /^\d+$/.test(key)) i = parseInt(key, 10) - 1;
-      if (i < 0) return m;                 // 없는 열 이름은 그대로 보여 준다
-      if (!row) return m;
-      return String(row[i] == null ? '' : row[i]);
+    return String(tpl).replace(/\{([^{}]*)\}/g, function (m, body) {
+      body = body.trim();
+      if (body === '') return m;
+
+      var filters = [];
+      var bar = body.indexOf('|');
+      if (bar >= 0) {
+        filters = body.slice(bar + 1).split('|').map(function (f) { return f.trim(); });
+        body = body.slice(0, bar).trim();
+      }
+      var ci = body.indexOf(':');
+      var key = ci >= 0 ? body.slice(0, ci).trim() : body;
+      var arg = ci >= 0 ? body.slice(ci + 1) : null;
+      var val;
+
+      if (key === '일련번호' || key === 'seq') {
+        var start = 1, width = 0;
+        if (arg && /^\d+$/.test(arg.trim())) { start = parseInt(arg, 10); width = arg.trim().length; }
+        var num = start + ((ctx && ctx.seq ? ctx.seq : 1) - 1);
+        val = String(num);
+        while (val.length < width) val = '0' + val;
+      } else if (key === '행번호' || key === 'row') {
+        val = String(ctx && ctx.rowNo ? ctx.rowNo : 1);
+      } else if (key === '오늘' || key === '날짜' || key === 'date') {
+        val = fmtDate(arg || 'YYYY-MM-DD');
+      } else if (key === '시간' || key === 'time') {
+        val = fmtDate(arg || 'HH:mm');
+      } else {
+        var i = headers ? headers.indexOf(body) : -1;
+        if (i < 0 && /^\d+$/.test(body)) i = parseInt(body, 10) - 1;
+        if (i < 0) return m;                       // 없는 이름은 그대로 보여 준다
+        if (!row) return m;
+        val = String(row[i] == null ? '' : row[i]);
+      }
+
+      filters.forEach(function (f) {
+        if (f === '숫자') val = val.replace(/\D/g, '');
+        else if (f === '대문자') val = val.toUpperCase();
+        else if (f === '소문자') val = val.toLowerCase();
+        else if (f === 'ean13' || f === 'ean' || f === '체크디지트') {
+          var d = val.replace(/\D/g, '');
+          val = d + QL.eanCheck(d);
+        }
+      });
+      return val;
     });
   };
-  /* 템플릿이 열을 참조하는지 */
-  QL.isBound = function (tpl, headers) {
-    var hit = false;
-    String(tpl || '').replace(/\{([^{}]*)\}/g, function (m, k) {
-      k = k.trim();
-      if ((headers && headers.indexOf(k) >= 0) || /^\d+$/.test(k)) hit = true;
-      return m;
-    });
-    return hit;
-  };
+
+  /* 내장 변수 목록 — 속성 패널의 "열 넣기" 드롭다운에서 쓴다 */
+  QL.BUILTINS = [
+    { v: '일련번호', n: '일련번호 1,2,3…' },
+    { v: '일련번호:0001', n: '일련번호 0001…' },
+    { v: '행번호', n: '데이터 행 번호' },
+    { v: '오늘', n: '오늘 날짜 2026-10-03' },
+    { v: '오늘:YY.MM.DD', n: '오늘 날짜 26.10.03' },
+    { v: '시간', n: '현재 시각 14:05' }
+  ];
 
   /* ---------- QR ---------- */
   var qrCache = {};
@@ -125,6 +186,12 @@ window.QL = window.QL || {};
     } catch (e) { out = null; }
     bcCache[key] = out;
     return out;
+  };
+
+  /* 바코드 값이 해당 규격에 맞는지 (SVG 생성 결과를 재사용하므로 캐시가 공유된다) */
+  QL.barcodeValid = function (text, fmt) {
+    if (text == null || text === '') return false;
+    return QL.barcodeSvg(text, fmt || 'CODE128', '#000', 0) !== null;
   };
 
   /* ---------- 상자에 맞춰 글자 크기 줄이기 ---------- */
@@ -202,14 +269,14 @@ window.QL = window.QL || {};
   };
 
   /* ---------- 요소 1개 → HTML ---------- */
-  QL.elHtml = function (el, row, headers) {
+  QL.elHtml = function (el, row, headers, ctx) {
     var st = 'left:' + el.x + 'mm;top:' + el.y + 'mm;width:' + el.w + 'mm;height:' + el.h + 'mm;';
     if (el.rot) st += 'transform:rotate(' + el.rot + 'deg);';
     if (el.opacity != null && el.opacity < 1) st += 'opacity:' + el.opacity + ';';
     var inner = '';
 
     if (el.type === 'text') {
-      var txt = QL.resolve(el.tpl, row, headers);
+      var txt = QL.resolve(el.tpl, row, headers, ctx);
       var size = el.fit ? QL.fitFontSize(txt, el, el.w, el.h) : el.size;
       var js = el.align === 'center' ? 'center' : (el.align === 'right' ? 'flex-end' : 'flex-start');
       var ai = el.valign === 'middle' ? 'center' : (el.valign === 'bottom' ? 'flex-end' : 'flex-start');
@@ -223,13 +290,13 @@ window.QL = window.QL || {};
         '">' + QL.esc(txt) + '</div></div>';
 
     } else if (el.type === 'qr') {
-      var qtext = QL.resolve(el.tpl, row, headers);
+      var qtext = QL.resolve(el.tpl, row, headers, ctx);
       var svg = qtext ? QL.qrSvg(qtext, el.ecc || 'M', el.quiet == null ? 2 : el.quiet) : null;
       inner = '<div class="inner" style="color:' + (el.color || '#000') + ';align-items:center;justify-content:center">' +
         (svg || '<span class="err">QR 내용 없음</span>') + '</div>';
 
     } else if (el.type === 'barcode') {
-      var btext = QL.resolve(el.tpl, row, headers);
+      var btext = QL.resolve(el.tpl, row, headers, ctx);
       var bsvg = btext ? QL.barcodeSvg(btext, el.fmt || 'CODE128', el.color || '#000', el.quiet == null ? 10 : el.quiet) : null;
       if (!bsvg) {
         inner = '<div class="inner" style="align-items:center;justify-content:center">' +
@@ -261,9 +328,9 @@ window.QL = window.QL || {};
     return '<div class="el" data-id="' + el.id + '" style="' + st + '">' + inner + '</div>';
   };
 
-  QL.labelHtml = function (elements, row, headers) {
+  QL.labelHtml = function (elements, row, headers, ctx) {
     var s = '', i;
-    for (i = 0; i < elements.length; i++) s += QL.elHtml(elements[i], row, headers);
+    for (i = 0; i < elements.length; i++) s += QL.elHtml(elements[i], row, headers, ctx);
     return s;
   };
 
@@ -288,7 +355,8 @@ window.QL = window.QL || {};
           '<div class="page' + (o.border ? ' bordered' : '') + '">' +
           '<div class="slot" style="left:' + o.offX + 'mm;top:' + o.offY + 'mm;width:' + o.labelW +
           'mm;height:' + o.labelH + 'mm;' + (tf ? 'transform:' + tf + ';transform-origin:0 0;' : '') + '">' +
-          QL.labelHtml(o.elements, items[i].row, o.headers) + '</div></div></div>');
+          QL.labelHtml(o.elements, items[i].row, o.headers,
+            { seq: i + 1, rowNo: items[i].rowNo }) + '</div></div></div>');
       }
       return { html: html.join(''), pages: n, pw: pw, ph: ph, limited: limited, shown: count };
     }
@@ -313,7 +381,9 @@ window.QL = window.QL || {};
         var y = o.mt + Math.floor(s / o.cols) * (o.labelH + o.gapY);
         html.push('<div class="slot" style="left:' + x + 'mm;top:' + y + 'mm;width:' + o.labelW +
           'mm;height:' + o.labelH + 'mm">' +
-          QL.labelHtml(o.elements, items[idx++].row, o.headers) + '</div>');
+          QL.labelHtml(o.elements, items[idx].row, o.headers,
+            { seq: idx + 1, rowNo: items[idx].rowNo }) + '</div>');
+        idx++;
       }
       html.push('</div></div>');
     }

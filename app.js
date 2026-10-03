@@ -155,10 +155,10 @@ window.QL = window.QL || {};
     var items = [], seen = {}, dup = 0, skip = 0;
 
     if (!S.rows.length) {
-      for (var k = 0; k < rep; k++) items.push({ row: null });
+      for (var k = 0; k < rep; k++) items.push({ row: null, rowNo: 1 });
       return { items: items, dup: 0, skip: 0 };
     }
-    S.rows.forEach(function (row) {
+    S.rows.forEach(function (row, rowIdx) {
       var joined = row.join('\u0001');
       if (skipEmpty && joined.replace(/\u0001/g, '').trim() === '') { skip++; return; }
       if (dedupe) { if (seen[joined]) { dup++; return; } seen[joined] = 1; }
@@ -170,9 +170,73 @@ window.QL = window.QL || {};
       qty *= rep;
       if (qty < 1) return;
       if (qty > 2000) qty = 2000;
-      for (var i = 0; i < qty; i++) items.push({ row: row });
+      for (var i = 0; i < qty; i++) items.push({ row: row, rowNo: rowIdx + 1 });
     });
     return { items: items, dup: dup, skip: skip };
+  }
+
+  /* ---------- 데이터 검증 · 표 ---------- */
+  var VALIDATE_MAX = 500, TABLE_MAX = 200;
+
+  /* 바코드 요소에 들어갈 값이 그 규격에 맞는지 행마다 검사 */
+  function validateRows() {
+    var out = { prob: {}, dupe: {}, count: 0 };
+    if (!S.rows.length) return out;
+
+    var bcs = S.elements.filter(function (e) { return e.type === 'barcode' && e.tpl; });
+    var seen = {};
+    var lim = Math.min(S.rows.length, VALIDATE_MAX);
+    for (var i = 0; i < lim; i++) {
+      var row = S.rows[i];
+      var joined = row.join('\u0001');
+      if (seen[joined]) out.dupe[i] = 1; else seen[joined] = 1;
+
+      for (var k = 0; k < bcs.length; k++) {
+        var el = bcs[k];
+        var v = QL.resolve(el.tpl, row, S.headers, { seq: i + 1, rowNo: i + 1 });
+        var msg = null;
+        if (!v) msg = (el.name || '바코드') + ' 값이 비어 있음';
+        else if (!QL.barcodeValid(v, el.fmt || 'CODE128'))
+          msg = (el.name || '바코드') + ' — ' + (el.fmt || 'CODE128') + ' 형식에 맞지 않음: ' + v;
+        if (msg) {
+          (out.prob[i] = out.prob[i] || []).push(msg);
+          out.count++;
+        }
+      }
+    }
+    return out;
+  }
+
+  function drawTable() {
+    var wrap = $('#dataTable');
+    if (wrap.hidden) return;
+    if (!S.rows.length) { wrap.innerHTML = '<p class="hint" style="padding:8px">데이터가 없습니다.</p>'; return; }
+    var v = validateRows();
+    var max = Math.min(S.rows.length, TABLE_MAX);
+    var h = '<table class="dt"><thead><tr><th>#</th>' +
+      S.headers.map(function (x) { return '<th>' + QL.esc(x) + '</th>'; }).join('') + '</tr></thead><tbody>';
+    for (var i = 0; i < max; i++) {
+      var cls = (v.prob[i] ? 'bad ' : '') + (v.dupe[i] ? 'dupe ' : '') + (i === S.sampleRow ? 'cur' : '');
+      h += '<tr data-row="' + i + '" class="' + cls.trim() + '"' +
+        (v.prob[i] ? ' title="' + QL.esc(v.prob[i].join('\n')) + '"' : '') + '>' +
+        '<td class="n">' + (i + 1) + '</td>' +
+        S.rows[i].map(function (c) { return '<td>' + QL.esc(c) + '</td>'; }).join('') + '</tr>';
+    }
+    h += '</tbody></table>';
+    if (S.rows.length > max) h += '<p class="hint" style="padding:6px">' + max + '행까지 표시 (전체 ' + S.rows.length + '행)</p>';
+    wrap.innerHTML = h;
+  }
+
+  function drawWarn() {
+    var el = $('#dataWarn');
+    if (!S.rows.length) { el.hidden = true; return; }
+    var v = validateRows();
+    var rows = Object.keys(v.prob).map(function (i) { return +i + 1; });
+    if (!rows.length) { el.hidden = true; return; }
+    var head = rows.slice(0, 8).join(', ') + (rows.length > 8 ? ' 외 ' + (rows.length - 8) + '행' : '');
+    el.hidden = false;
+    el.innerHTML = '바코드 형식 오류 <b>' + rows.length + '행</b> — ' + head +
+      '<br><span style="opacity:.8">' + QL.esc(v.prob[rows[0] - 1][0]) + '</span>';
   }
 
   /* ---------- 용지 ---------- */
@@ -236,6 +300,8 @@ window.QL = window.QL || {};
   QL.changed = changed;
 
   function updateStat() {
+    drawWarn();
+    drawTable();
     var res = buildItems(), o = paperOpts();
     var n = res.items.length;
     var pages = o.mode === 'roll' ? n
@@ -579,7 +645,19 @@ window.QL = window.QL || {};
     });
     $('#colQty').addEventListener('change', function () { this.dataset.touched = '1'; changed(); });
     $('#sampleRow').addEventListener('change', function () {
-      S.sampleRow = parseInt(this.value, 10) || 0; QL.D.draw();
+      S.sampleRow = parseInt(this.value, 10) || 0; QL.D.draw(); drawTable();
+    });
+    $('#btnTable').addEventListener('click', function () {
+      var w = $('#dataTable');
+      w.hidden = !w.hidden;
+      this.textContent = w.hidden ? '표로 확인 ▾' : '표 접기 ▴';
+      drawTable();
+    });
+    $('#dataTable').addEventListener('click', function (e) {
+      var tr = e.target.closest('tr[data-row]'); if (!tr) return;
+      S.sampleRow = parseInt(tr.dataset.row, 10) || 0;
+      $('#sampleRow').value = String(S.sampleRow);
+      QL.D.draw(); drawTable();
     });
 
     // 요소 추가

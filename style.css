@@ -127,6 +127,8 @@ textarea{resize:vertical; min-height:92px; font-family:ui-monospace,Menlo,Consol
   cursor:pointer; font-size:11.5px}
 .layers li:hover{background:#f2f4f7}
 .layers li.on{background:#e8f0fe; color:#1d4ed8; font-weight:600}
+.layers li.locked .nm{opacity:.5; text-decoration:line-through}
+.layers li .lk{padding:2px 4px; font-size:10px; line-height:1}
 .layers li .ic{width:15px; text-align:center; opacity:.7}
 .layers li .nm{flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap}
 .layers .none{color:var(--muted); font-size:11px; padding:4px 2px; cursor:default}
@@ -155,6 +157,20 @@ textarea{resize:vertical; min-height:92px; font-family:ui-monospace,Menlo,Consol
 .ghost{position:absolute; outline:.2mm dashed #e2e5ea; outline-offset:-.1mm; pointer-events:none}
 .bordered .slot{outline:.25mm solid #000; outline-offset:-.125mm}
 .more{text-align:center; color:var(--muted); font-size:12px; padding:14px}
+
+/* ---- 데이터 표 ---- */
+.dtwrap{margin-top:7px; max-height:230px; overflow:auto; border:1px solid var(--line); border-radius:6px}
+table.dt{border-collapse:collapse; font-size:11px; width:100%; white-space:nowrap}
+table.dt th,table.dt td{border-bottom:1px solid var(--line2); padding:3px 6px; text-align:left;
+  max-width:140px; overflow:hidden; text-overflow:ellipsis}
+table.dt thead th{position:sticky; top:0; background:#f6f7f9; font-weight:600; color:var(--muted); z-index:1}
+table.dt td.n{color:var(--muted); text-align:right; background:#fafbfc; position:sticky; left:0}
+table.dt tbody tr{cursor:pointer}
+table.dt tbody tr:hover{background:#f2f4f7}
+table.dt tbody tr.cur{background:#e8f0fe}
+table.dt tbody tr.bad td{background:#fef2f2; color:#b91c1c}
+table.dt tbody tr.bad.cur td{background:#fde2e2}
+table.dt tbody tr.dupe td.n{color:#b45309; font-weight:700}
 
 /* ---- 알림 토스트 ---- */
 .toast{

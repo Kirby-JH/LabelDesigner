@@ -138,11 +138,17 @@ window.QL = window.QL || {};
 
   /* ---------- 선택 (다중) ---------- */
   function isSel(id) { return S.selIds.indexOf(id) >= 0; }
+  function byId(id) {
+    for (var i = 0; i < S.elements.length; i++) if (S.elements[i].id === id) return S.elements[i];
+    return null;
+  }
+  function isLocked(id) { var e = byId(id); return !!(e && e.locked); }
   D.isSel = isSel;
   D.selAll = function () { return S.elements.filter(function (e) { return isSel(e.id); }); };
   /* 속성 패널은 하나만 골랐을 때 */
   D.sel = function () { var a = D.selAll(); return a.length === 1 ? a[0] : null; };
   D.select = function (id, additive) {
+    if (id && isLocked(id)) return;              // 잠긴 요소는 캔버스에서 집히지 않는다
     if (!id) S.selIds = [];
     else if (additive) {
       var i = S.selIds.indexOf(id);
@@ -252,12 +258,17 @@ window.QL = window.QL || {};
     commit(); D.draw(); D.onChange();
   };
 
+  function previewCtx() {
+    var n = (S.sampleRow || 0) + 1;
+    return { seq: n, rowNo: n };
+  }
+
   /* ---------- 그리기 ---------- */
   D.draw = function () {
     var cv = $('#canvas');
     if (!cv) return;
     var row = S.rows.length ? S.rows[Math.min(S.sampleRow, S.rows.length - 1)] : null;
-    cv.innerHTML = QL.labelHtml(S.elements, row, S.headers);
+    cv.innerHTML = QL.labelHtml(S.elements, row, S.headers, previewCtx());
     S.selIds.forEach(function (id) {
       var e = cv.querySelector('[data-id="' + id + '"]');
       if (e) e.classList.add('sel');
@@ -318,9 +329,12 @@ window.QL = window.QL || {};
     var h = '';
     for (var i = S.elements.length - 1; i >= 0; i--) {
       var e = S.elements[i];
-      h += '<li data-id="' + e.id + '" class="' + (isSel(e.id) ? 'on' : '') + '">' +
+      h += '<li data-id="' + e.id + '" class="' + (isSel(e.id) ? 'on' : '') +
+        (e.locked ? ' locked' : '') + '">' +
         '<span class="ic">' + ICON[e.type] + '</span>' +
         '<span class="nm">' + esc(e.name || e.type) + '</span>' +
+        '<button class="btn-s lk" data-lock="1" title="' + (e.locked ? '잠금 해제' : '잠그기') + '">' +
+        (e.locked ? '🔒' : '🔓') + '</button>' +
         '<button class="btn-s" data-mv="1" title="앞으로">▲</button>' +
         '<button class="btn-s" data-mv="-1" title="뒤로">▼</button></li>';
     }
@@ -333,9 +347,14 @@ window.QL = window.QL || {};
       '<input type="' + type + '" data-prop="' + prop + '" ' + (extra || '') + '></div>';
   }
   function colOptions() {
-    return S.headers.map(function (h, i) {
+    var cols = S.headers.map(function (h) {
       return '<option value="' + esc(h) + '">' + esc(h) + '</option>';
     }).join('');
+    var bi = QL.BUILTINS.map(function (b) {
+      return '<option value="' + esc(b.v) + '">' + esc(b.n) + '</option>';
+    }).join('');
+    return (cols ? '<optgroup label="데이터 열">' + cols + '</optgroup>' : '') +
+      '<optgroup label="내장 변수">' + bi + '</optgroup>';
   }
 
   function drawProps() {
@@ -366,6 +385,8 @@ window.QL = window.QL || {};
       '<div class="f"><label>이름</label><input type="text" data-prop="name"></div>' +
       '<div class="f2">' + fld('X (mm)', 'x', 'number', 'step="0.1"') + fld('Y (mm)', 'y', 'number', 'step="0.1"') + '</div>' +
       '<div class="f2">' + fld('가로 (mm)', 'w', 'number', 'step="0.1" min="0.5"') + fld('세로 (mm)', 'h', 'number', 'step="0.1" min="0.5"') + '</div>' +
+      '<div class="chk"><input type="checkbox" data-prop="locked" id="p_lock">' +
+      '<label for="p_lock">잠그기 (캔버스에서 선택·이동 안 됨)</label></div>' +
       '<div class="f2">' + fld('회전 (°)', 'rot', 'number', 'step="1"') +
       '<div class="f"><label>맞춤</label><div class="align-grp">' +
       '<button data-act="cx" title="가로 가운데">↔</button>' +
@@ -485,7 +506,7 @@ window.QL = window.QL || {};
   function redrawCanvasOnly() {
     var cv = $('#canvas');
     var row = S.rows.length ? S.rows[Math.min(S.sampleRow, S.rows.length - 1)] : null;
-    cv.innerHTML = QL.labelHtml(S.elements, row, S.headers);
+    cv.innerHTML = QL.labelHtml(S.elements, row, S.headers, previewCtx());
     S.selIds.forEach(function (id) {
       var q = cv.querySelector('[data-id="' + id + '"]');
       if (q) q.classList.add('sel');
@@ -568,6 +589,8 @@ window.QL = window.QL || {};
       var additive = e.shiftKey || e.ctrlKey || e.metaKey;
       var st = stageMM(e);
 
+      if (elDiv && isLocked(elDiv.dataset.id)) elDiv = null;   // 잠긴 요소는 통과
+
       /* 빈 곳 → 영역 선택 시작 */
       if (!hn && !elDiv) {
         if (!e.target.closest('#canvas')) return;
@@ -617,6 +640,7 @@ window.QL = window.QL || {};
         var x0 = Math.min(d.sx, st.x), x1 = Math.max(d.sx, st.x);
         var y0 = Math.min(d.sy, st.y), y1 = Math.max(d.sy, st.y);
         var hit = S.elements.filter(function (el) {
+          if (el.locked) return false;
           var b = elBBox(el);
           return b.x < x1 && b.x + b.w > x0 && b.y < y1 && b.y + b.h > y0;
         }).map(function (el) { return el.id; });
@@ -703,7 +727,7 @@ window.QL = window.QL || {};
 
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
         e.preventDefault();
-        S.selIds = S.elements.map(function (x) { return x.id; });
+        S.selIds = S.elements.filter(function (x) { return !x.locked; }).map(function (x) { return x.id; });
         D.draw();
         return;
       }
@@ -757,6 +781,14 @@ window.QL = window.QL || {};
 
     $('#layers').addEventListener('click', function (e) {
       var li = e.target.closest('li[data-id]'); if (!li) return;
+      if (e.target.closest('[data-lock]')) {
+        var t = byId(li.dataset.id);
+        begin();
+        t.locked = !t.locked;
+        if (t.locked) S.selIds = S.selIds.filter(function (x) { return x !== t.id; });
+        commit(); D.draw(); D.onChange();
+        return;
+      }
       var mv = e.target.closest('[data-mv]');
       if (mv) { if (!isSel(li.dataset.id)) S.selIds = [li.dataset.id]; move(parseInt(mv.dataset.mv, 10)); }
       else D.select(li.dataset.id, e.shiftKey || e.ctrlKey || e.metaKey);
