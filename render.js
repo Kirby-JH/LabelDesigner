@@ -7,17 +7,21 @@ window.QL = window.QL || {};
 
   var SVGNS = 'http://www.w3.org/2000/svg';
 
+  /* 글꼴 이름은 반드시 작은따옴표로 감쌀 것.
+     style="..." 안에 그대로 들어가므로 큰따옴표를 쓰면 속성이 중간에서 끊긴다. */
   QL.FONTS = [
-    { v: 'sans', n: '산세리프(기본)', css: '"Pretendard","Malgun Gothic","Noto Sans KR",system-ui,sans-serif' },
-    { v: 'gothic', n: '맑은 고딕', css: '"Malgun Gothic","맑은 고딕","Noto Sans KR",sans-serif' },
-    { v: 'dotum', n: '돋움', css: 'Dotum,"돋움",Gulim,sans-serif' },
-    { v: 'batang', n: '바탕(명조)', css: 'Batang,"바탕","Noto Serif KR",serif' },
-    { v: 'mono', n: '고정폭', css: 'ui-monospace,Menlo,Consolas,"D2Coding",monospace' }
+    { v: 'sans', n: '산세리프(기본)', css: "'Pretendard','Malgun Gothic','Noto Sans KR',system-ui,sans-serif" },
+    { v: 'gothic', n: '맑은 고딕', css: "'Malgun Gothic','맑은 고딕','Noto Sans KR',sans-serif" },
+    { v: 'dotum', n: '돋움', css: "Dotum,'돋움',Gulim,sans-serif" },
+    { v: 'batang', n: '바탕(명조)', css: "Batang,'바탕','Noto Serif KR',serif" },
+    { v: 'mono', n: '고정폭', css: "ui-monospace,Menlo,Consolas,'D2Coding',monospace" }
   ];
   QL.fontCss = function (v) {
     for (var i = 0; i < QL.FONTS.length; i++) if (QL.FONTS[i].v === v) return QL.FONTS[i].css;
     return QL.FONTS[0].css;
   };
+  /* style="..." 에 넣기 전 큰따옴표를 한 번 더 막아 둔다 */
+  function styleSafe(v) { return String(v == null ? '' : v).replace(/"/g, "'"); }
 
   QL.BARCODE_FORMATS = [
     { v: 'CODE128', n: 'CODE128 (자동)' },
@@ -138,9 +142,11 @@ window.QL = window.QL || {};
     var fam = QL.fontCss(el.font);
     var boxW = wMM * MM2PX, boxH = hMM * MM2PX;
     var lh = el.lh || 1.15;
-    var size = el.size;
 
-    function lineCount(pt) {
+    /* 주어진 크기에서 줄 수와 가장 긴 줄 너비를 센다.
+       줄바꿈은 CSS 의 overflow-wrap:anywhere 와 같게, 단어로 끊되
+       한 단어가 상자보다 넓으면 글자 단위로 쪼갠다. */
+    function measure(pt) {
       ctx.font = (el.italic ? 'italic ' : '') + (el.bold ? '700 ' : '400 ') + (pt * PT2PX) + 'px ' + fam;
       var paras = String(text).split('\n'), lines = 0, maxW = 0, p, i;
       for (p = 0; p < paras.length; p++) {
@@ -149,13 +155,23 @@ window.QL = window.QL || {};
           maxW = Math.max(maxW, ctx.measureText(paras[p]).width);
           continue;
         }
-        var words = paras[p].split(/(\s+)/), cur = '', n = 0;
-        for (i = 0; i < words.length; i++) {
-          var trial = cur + words[i];
-          if (ctx.measureText(trial).width > boxW && cur !== '') {
+        var tokens = paras[p].split(/(\s+)/), cur = '', n = 0;
+        for (i = 0; i < tokens.length; i++) {
+          var t = tokens[i];
+          if (t === '') continue;
+          if (ctx.measureText(t).width > boxW) {          // 상자보다 긴 단어 → 글자 단위
+            for (var c = 0; c < t.length; c++) {
+              if (cur !== '' && ctx.measureText(cur + t[c]).width > boxW) {
+                n++; maxW = Math.max(maxW, ctx.measureText(cur).width); cur = '';
+              }
+              cur += t[c];
+            }
+            continue;
+          }
+          if (cur !== '' && ctx.measureText(cur + t).width > boxW) {
             n++; maxW = Math.max(maxW, ctx.measureText(cur).width);
-            cur = words[i].replace(/^\s+/, '');
-          } else cur = trial;
+            cur = t.replace(/^\s+/, '');
+          } else cur += t;
         }
         n++; maxW = Math.max(maxW, ctx.measureText(cur).width);
         lines += n;
@@ -163,12 +179,23 @@ window.QL = window.QL || {};
       return { lines: lines, w: maxW };
     }
 
-    var r = lineCount(size);
-    var guard = 0;
-    while (size > 2.5 && guard++ < 80 &&
-      (r.w > boxW + 0.5 || r.lines * size * PT2PX * lh > boxH + 0.5)) {
-      size = Math.round((size - 0.25) * 100) / 100;
-      r = lineCount(size);
+    function fits(pt) {
+      var r = measure(pt);
+      return r.w <= boxW + 0.5 && r.lines * pt * PT2PX * lh <= boxH + 0.5;
+    }
+
+    var size;
+    if (fits(el.size)) {
+      size = el.size;                                     // 줄일 필요 없음
+    } else {
+      /* 0.25pt 해상도 이분 탐색 — 상자가 아무리 작아도 몇 단계면 끝난다 */
+      var lo = 2.5, hi = el.size, guard = 0;
+      while (hi - lo > 0.25 && guard++ < 30) {
+        var mid = Math.round(((lo + hi) / 2) * 4) / 4;
+        if (mid <= lo || mid >= hi) break;
+        if (fits(mid)) lo = mid; else hi = mid;
+      }
+      size = lo;
     }
     fitCache[key] = size;
     return size;
@@ -187,7 +214,7 @@ window.QL = window.QL || {};
       var js = el.align === 'center' ? 'center' : (el.align === 'right' ? 'flex-end' : 'flex-start');
       var ai = el.valign === 'middle' ? 'center' : (el.valign === 'bottom' ? 'flex-end' : 'flex-start');
       inner = '<div class="inner" style="align-items:' + ai + ';justify-content:' + js + '">' +
-        '<div style="font-family:' + QL.fontCss(el.font) + ';font-size:' + size + 'pt;' +
+        '<div style="font-family:' + styleSafe(QL.fontCss(el.font)) + ';font-size:' + size + 'pt;' +
         'font-weight:' + (el.bold ? 700 : 400) + ';' + (el.italic ? 'font-style:italic;' : '') +
         'color:' + (el.color || '#000') + ';line-height:' + (el.lh || 1.15) + ';' +
         (el.ls ? 'letter-spacing:' + el.ls + 'mm;' : '') +
@@ -212,7 +239,7 @@ window.QL = window.QL || {};
         inner = '<div class="inner" style="flex-direction:column">' +
           '<div style="flex:1 1 auto;width:100%;min-height:0">' + bsvg + '</div>' +
           (el.hri ? '<div style="flex:0 0 auto;width:100%;text-align:center;line-height:1.15;' +
-            'font-family:' + QL.fontCss(el.font || 'sans') + ';font-size:' + el.hriSize + 'pt;' +
+            'font-family:' + styleSafe(QL.fontCss(el.font || 'sans')) + ';font-size:' + el.hriSize + 'pt;' +
             'color:' + (el.color || '#000') + ';white-space:nowrap;overflow:hidden">' +
             QL.esc(btext) + '</div>' : '') +
           '</div>';
