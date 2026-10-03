@@ -1,0 +1,181 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>QR 라벨 생성기 — 바코드 리스트 → 라벨용지 인쇄</title>
+<link rel="stylesheet" href="style.css">
+<style id="pageRule">@page{size:210mm 297mm;margin:0}</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ 설정 패널 ============ -->
+  <aside class="panel">
+    <h1>QR 라벨 생성기<span>바코드 리스트를 라벨용지 규격에 맞춰 인쇄</span></h1>
+
+    <!-- 1. 데이터 -->
+    <section>
+      <h2>1. 데이터 입력</h2>
+      <div class="tabs">
+        <button id="tabPaste" class="on" type="button">붙여넣기</button>
+        <button id="tabFile" type="button">파일 열기</button>
+      </div>
+
+      <div id="panePaste">
+        <textarea id="pasteArea" placeholder="엑셀에서 셀을 복사해 여기에 붙여넣으세요 (Ctrl+V).&#10;여러 열도 그대로 붙여넣을 수 있습니다.&#10;&#10;바코드&#9;품명&#9;수량&#10;8801234567890&#9;생수 500ml&#9;3&#10;8809876543210&#9;우유 1L&#9;1"></textarea>
+        <div class="btns" style="margin-top:6px">
+          <button id="btnSample" type="button">샘플 데이터</button>
+          <button id="btnClear" type="button">지우기</button>
+        </div>
+      </div>
+
+      <div id="paneFile" hidden>
+        <div class="drop" id="drop">
+          엑셀/CSV 파일을 끌어다 놓거나<br>클릭해서 선택 (.xlsx .xls .csv .txt)
+        </div>
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.txt" hidden>
+        <div class="field" id="sheetWrap" hidden style="margin-top:8px">
+          <label for="sheetSel">시트 선택</label>
+          <select id="sheetSel"></select>
+        </div>
+        <p class="hint" id="fileName"></p>
+      </div>
+
+      <div class="chk"><input type="checkbox" id="hasHeader" checked><label for="hasHeader">첫 행을 머리글로 사용</label></div>
+
+      <div class="row">
+        <div><label for="colCode">QR 데이터 열 <b style="color:#dc2626">*</b></label><select id="colCode"></select></div>
+        <div><label for="colQty">수량 열</label><select id="colQty"></select></div>
+      </div>
+      <div class="row">
+        <div><label for="colText1">아래 표시 텍스트 1</label><select id="colText1"></select></div>
+        <div><label for="colText2">텍스트 2</label><select id="colText2"></select></div>
+      </div>
+
+      <div class="chk"><input type="checkbox" id="skipEmpty" checked><label for="skipEmpty">빈 값 건너뛰기</label></div>
+      <div class="chk"><input type="checkbox" id="dedupe"><label for="dedupe">중복 바코드 제거</label></div>
+
+      <div class="row">
+        <div><label for="prefix">접두사</label><input type="text" id="prefix" placeholder="예: https://..."></div>
+        <div><label for="suffix">접미사</label><input type="text" id="suffix"></div>
+      </div>
+      <div class="field">
+        <label for="repeat">항목마다 반복 인쇄 (장)</label>
+        <input type="number" id="repeat" value="1" min="1" max="500">
+      </div>
+
+      <div class="summary" id="dataSummary">데이터를 입력하세요.</div>
+    </section>
+
+    <!-- 2. 라벨 용지 -->
+    <section>
+      <h2>2. 라벨 용지</h2>
+      <div class="field">
+        <label for="preset">규격 프리셋</label>
+        <select id="preset"></select>
+      </div>
+      <div class="row">
+        <div><label for="pageW">용지 가로 (mm)</label><input type="number" id="pageW" value="210" step="0.1"></div>
+        <div><label for="pageH">용지 세로 (mm)</label><input type="number" id="pageH" value="297" step="0.1"></div>
+      </div>
+      <div class="row">
+        <div><label for="cols">열 수 (가로 칸)</label><input type="number" id="cols" value="3" min="1" max="30"></div>
+        <div><label for="rows">행 수 (세로 칸)</label><input type="number" id="rows" value="7" min="1" max="40"></div>
+      </div>
+      <div class="row">
+        <div><label for="labelW">라벨 가로 (mm)</label><input type="number" id="labelW" value="63.5" step="0.1"></div>
+        <div><label for="labelH">라벨 세로 (mm)</label><input type="number" id="labelH" value="38.1" step="0.1"></div>
+      </div>
+      <div class="row">
+        <div><label for="gapX">가로 간격 (mm)</label><input type="number" id="gapX" value="2.5" step="0.1"></div>
+        <div><label for="gapY">세로 간격 (mm)</label><input type="number" id="gapY" value="0" step="0.1"></div>
+      </div>
+      <div class="chk"><input type="checkbox" id="autoMargin" checked><label for="autoMargin">여백 자동 (가운데 정렬)</label></div>
+      <div class="row">
+        <div><label for="marginL">좌측 여백 (mm)</label><input type="number" id="marginL" value="7.25" step="0.1" disabled></div>
+        <div><label for="marginT">상단 여백 (mm)</label><input type="number" id="marginT" value="15.15" step="0.1" disabled></div>
+      </div>
+      <div class="row">
+        <div><label for="offX">인쇄 보정 ↔ (mm)</label><input type="number" id="offX" value="0" step="0.1"></div>
+        <div><label for="offY">인쇄 보정 ↕ (mm)</label><input type="number" id="offY" value="0" step="0.1"></div>
+      </div>
+      <p class="hint">프리셋은 일반적인 A4 라벨 규격입니다. 실제 용지와 다르면 라벨 포장의 치수를 보고 직접 입력하세요. 출력물이 조금씩 밀리면 <b>인쇄 보정</b>으로 맞춥니다.</p>
+    </section>
+
+    <!-- 3. 라벨 내용 -->
+    <section>
+      <h2>3. QR · 텍스트</h2>
+      <div class="row">
+        <div><label for="layout">배치</label>
+          <select id="layout">
+            <option value="v">QR 위 / 텍스트 아래</option>
+            <option value="h">QR 왼쪽 / 텍스트 오른쪽</option>
+            <option value="q">QR만</option>
+          </select>
+        </div>
+        <div><label for="ecc">오류 보정</label>
+          <select id="ecc">
+            <option value="L">L (7%)</option>
+            <option value="M" selected>M (15%)</option>
+            <option value="Q">Q (25%)</option>
+            <option value="H">H (30%)</option>
+          </select>
+        </div>
+      </div>
+      <div class="row">
+        <div><label for="qrSize">QR 크기 (mm, 0=자동)</label><input type="number" id="qrSize" value="0" min="0" step="0.5"></div>
+        <div><label for="quiet">QR 여백 (모듈)</label><input type="number" id="quiet" value="2" min="0" max="8"></div>
+      </div>
+      <div class="row">
+        <div><label for="fontSize">글자 크기 (pt)</label><input type="number" id="fontSize" value="7" min="3" max="30" step="0.5"></div>
+        <div><label for="pad">라벨 안쪽 여백 (mm)</label><input type="number" id="pad" value="1.5" min="0" step="0.5"></div>
+      </div>
+      <div class="chk"><input type="checkbox" id="bold"><label for="bold">텍스트 굵게</label></div>
+    </section>
+
+    <!-- 4. 출력 -->
+    <section>
+      <h2>4. 출력</h2>
+      <div class="field">
+        <label for="startAt">시작 칸 번호 (쓰다 남은 용지 재사용)</label>
+        <input type="number" id="startAt" value="1" min="1">
+      </div>
+      <div class="chk"><input type="checkbox" id="guide" checked><label for="guide">미리보기에 칸 가이드선 표시</label></div>
+      <div class="chk"><input type="checkbox" id="border"><label for="border">라벨 테두리 함께 인쇄</label></div>
+      <p class="hint">인쇄 대화상자에서 <b>여백: 없음</b>, <b>배율: 100%</b>(크기에 맞춤 해제), <b>배경 그래픽</b> 켜기로 설정해야 치수가 정확합니다.</p>
+      <div class="btns" style="margin-top:10px">
+        <button id="btnReset" type="button">설정 초기화</button>
+      </div>
+    </section>
+  </aside>
+
+  <!-- ============ 미리보기 ============ -->
+  <main class="work">
+    <div class="toolbar">
+      <button class="primary" id="btnPrint" type="button">🖨 인쇄 / PDF 저장</button>
+      <span class="stat" id="stat">—</span>
+      <span class="sp"></span>
+      <label for="zoom" style="margin:0">확대</label>
+      <select id="zoom" style="width:auto">
+        <option value="fit" selected>맞춤</option>
+        <option value="0.5">50%</option>
+        <option value="0.75">75%</option>
+        <option value="1">100%</option>
+        <option value="1.5">150%</option>
+      </select>
+    </div>
+    <div class="viewport" id="viewport">
+      <div class="empty" id="empty">
+        왼쪽에 바코드 목록을 붙여넣으면<br>라벨용지 규격에 맞춘 미리보기가 여기에 표시됩니다.
+      </div>
+      <div id="preview"></div>
+    </div>
+  </main>
+</div>
+
+<script src="vendor/qrcode.min.js"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
