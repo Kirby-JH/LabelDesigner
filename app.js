@@ -248,33 +248,51 @@ window.QL = window.QL || {};
       '<br><span style="opacity:.8">' + QL.esc(v.prob[rows[0] - 1][0]) + '</span>';
   }
 
+  /* 출력할 구간만 잘라 낸다. 일련번호는 원래 순서를 그대로 이어 간다. */
+  function applyRange(all) {
+    var from = Math.max(1, parseInt($('#rangeFrom').value, 10) || 1);
+    var to = parseInt($('#rangeTo').value, 10) || 0;
+    if (to <= 0 || to > all.length) to = all.length;
+    if (from > all.length) from = all.length || 1;
+    if (to < from) to = from;
+    return { items: all.slice(from - 1, to), offset: from - 1, from: from, to: to, total: all.length };
+  }
+
   /* ---------- 용지 ---------- */
+  /* 길이 입력칸은 모두 mm 로 환산해 읽는다 */
+  var MMFIELDS = ['labelW', 'labelH', 'rollGap', 'pageW', 'pageH', 'sLabelW', 'sLabelH',
+    'gapX', 'gapY', 'marginL', 'marginT', 'offX', 'offY'];
+  function mmv(id, def) {
+    var v = QL.U.from($('#' + id).value);
+    return isFinite(v) ? v : def;
+  }
+
   function paperOpts() {
     var mode = $('#paperMode').value;
-    var offX = parseFloat($('#offX').value) || 0, offY = parseFloat($('#offY').value) || 0;
+    var offX = mmv('offX', 0), offY = mmv('offY', 0);
     if (mode === 'roll') {
       return {
         mode: 'roll',
-        labelW: parseFloat($('#labelW').value) || 60,
-        labelH: parseFloat($('#labelH').value) || 40,
-        gap: parseFloat($('#rollGap').value) || 0,
+        labelW: mmv('labelW', 60),
+        labelH: mmv('labelH', 40),
+        gap: mmv('rollGap', 0),
         rot: parseInt($('#rotate').value, 10) || 0,
         offX: offX, offY: offY, border: $('#border').checked
       };
     }
-    var pw = parseFloat($('#pageW').value) || 210, ph = parseFloat($('#pageH').value) || 297;
+    var pw = mmv('pageW', 210), ph = mmv('pageH', 297);
     var cols = Math.max(1, parseInt($('#cols').value, 10) || 1);
     var rows = Math.max(1, parseInt($('#rows').value, 10) || 1);
-    var lw = parseFloat($('#sLabelW').value) || 50, lh = parseFloat($('#sLabelH').value) || 30;
-    var gx = parseFloat($('#gapX').value) || 0, gy = parseFloat($('#gapY').value) || 0;
+    var lw = mmv('sLabelW', 50), lh = mmv('sLabelH', 30);
+    var gx = mmv('gapX', 0), gy = mmv('gapY', 0);
     var ml, mt;
     if ($('#autoMargin').checked) {
       ml = r2((pw - (cols * lw + (cols - 1) * gx)) / 2);
       mt = r2((ph - (rows * lh + (rows - 1) * gy)) / 2);
-      $('#marginL').value = ml; $('#marginT').value = mt;
+      $('#marginL').value = QL.U.to(ml); $('#marginT').value = QL.U.to(mt);
     } else {
-      ml = parseFloat($('#marginL').value) || 0;
-      mt = parseFloat($('#marginT').value) || 0;
+      ml = mmv('marginL', 0);
+      mt = mmv('marginT', 0);
     }
     return {
       mode: 'sheet', pageW: pw, pageH: ph, cols: cols, rows: rows,
@@ -313,10 +331,13 @@ window.QL = window.QL || {};
     drawWarn();
     drawTable();
     var res = buildItems(), o = paperOpts();
-    var n = res.items.length;
+    var rg = applyRange(res.items);
+    var n = rg.items.length;
     var pages = o.mode === 'roll' ? n
       : Math.ceil((n + (o.startAt % (o.cols * o.rows))) / (o.cols * o.rows));
-    $('#stat').innerHTML = '라벨 <b>' + n + '</b>장 · 페이지 <b>' + (n ? pages : 0) + '</b>장';
+    $('#stat').innerHTML = '라벨 <b>' + n + '</b>장 · 페이지 <b>' + (n ? pages : 0) + '</b>장' +
+      (rg.total !== n ? ' <span style="opacity:.7">(전체 ' + rg.total + '장 중 ' +
+        rg.from + '~' + rg.to + ')</span>' : '');
     var sum = $('#dataSummary');
     if (!S.rows.length) {
       sum.className = 'note';
@@ -359,7 +380,9 @@ window.QL = window.QL || {};
   function buildPreview() {
     var o = syncLabelSize();
     var res = buildItems();
-    o.items = res.items;
+    var rg = applyRange(res.items);
+    o.items = rg.items;
+    o.seqOffset = rg.offset;
     o.elements = S.elements;
     o.headers = S.headers;
     var out = QL.buildPages(o);
@@ -369,7 +392,7 @@ window.QL = window.QL || {};
     $('#pages').innerHTML = out.html +
       (out.limited ? '<p class="more">라벨이 많아 ' + QL.MAX_LABELS + '장까지만 만들었습니다. (전체 ' +
         res.items.length + '장) — 데이터를 나누어 출력하세요.</p>' : '') +
-      (res.items.length ? '' : '<p class="more">출력할 라벨이 없습니다.</p>');
+      (rg.items.length ? '' : '<p class="more">출력할 라벨이 없습니다.</p>');
     previewDirty = false;
     applyZoom();
   }
@@ -388,8 +411,8 @@ window.QL = window.QL || {};
   /* ---------- 저장/복원 ---------- */
   var IDS = ['hasHeader', 'colQty', 'repeat', 'skipEmpty', 'dedupe', 'paperMode', 'rollPreset',
     'labelW', 'labelH', 'rollGap', 'rotate', 'sheetPreset', 'pageW', 'pageH', 'cols', 'rows',
-    'sLabelW', 'sLabelH', 'gapX', 'gapY', 'autoMargin', 'marginL', 'marginT', 'startAt',
-    'offX', 'offY', 'border', 'snap'];
+    'sLabelW', 'sLabelH', 'gapX', 'gapY', 'autoMargin', 'marginL', 'marginT', 'startAt', 'rangeFrom', 'rangeTo',
+    'offX', 'offY', 'border', 'snap', 'unit'];
   var KEY = 'labeldesigner.v1';
 
   function collect() {
@@ -474,16 +497,16 @@ window.QL = window.QL || {};
   function applyRollPreset() {
     var p = ROLL.filter(function (x) { return x.id === $('#rollPreset').value; })[0];
     if (!p || p.id === 'custom') return;
-    $('#labelW').value = p.w; $('#labelH').value = p.h;
+    $('#labelW').value = QL.U.to(p.w); $('#labelH').value = QL.U.to(p.h);
     changed();
   }
   function applySheetPreset() {
     var p = SHEET.filter(function (x) { return x.id === $('#sheetPreset').value; })[0];
     if (!p || p.id === 'custom') return;
-    $('#pageW').value = 210; $('#pageH').value = 297;
+    $('#pageW').value = QL.U.to(210); $('#pageH').value = QL.U.to(297);
     $('#cols').value = p.c; $('#rows').value = p.r;
-    $('#sLabelW').value = p.w; $('#sLabelH').value = p.h;
-    $('#gapX').value = p.gx; $('#gapY').value = p.gy;
+    $('#sLabelW').value = QL.U.to(p.w); $('#sLabelH').value = QL.U.to(p.h);
+    $('#gapX').value = QL.U.to(p.gx); $('#gapY').value = QL.U.to(p.gy);
     $('#autoMargin').checked = true;
     toggleMargin(); changed();
   }
@@ -491,6 +514,25 @@ window.QL = window.QL || {};
     var on = $('#autoMargin').checked;
     $('#marginL').disabled = on; $('#marginT').disabled = on;
   }
+  /* 단위를 바꾸면 화면에 적힌 숫자와 (mm)/(in) 표시를 함께 갈아 끼운다 */
+  function applyUnit(prev) {
+    var next = $('#unit').value === 'in' ? 'in' : 'mm';
+    MMFIELDS.forEach(function (id) {
+      var el = $('#' + id);
+      var v = parseFloat(el.value);
+      if (isFinite(v)) {
+        var mm = Math.round((prev === 'in' ? v * 25.4 : v) * 100) / 100;
+        el.value = next === 'in' ? Math.round(mm / 25.4 * 10000) / 10000 : mm;
+      }
+      el.step = next === 'in' ? '0.001' : '0.1';
+    });
+    QL.U.unit = next;
+    S.unit = next;
+    $$('.side.left .u').forEach(function (sp) { sp.textContent = QL.U.label(); });
+    QL.D.draw();
+    changed();
+  }
+
   function togglePaperMode() {
     var roll = $('#paperMode').value === 'roll';
     $('#rollOpts').hidden = !roll;
@@ -596,7 +638,53 @@ window.QL = window.QL || {};
     setTable(XLSX.utils.sheet_to_json(ws, { header: 1, raw: false, defval: '', blankrows: false }));
   }
 
-  /* ---------- 서식 저장/불러오기 ---------- */
+  /* ---------- 서식 라이브러리 (브라우저에 여러 벌 보관) ---------- */
+  var LIBKEY = 'labeldesigner.lib.v1';
+
+  function libRead() {
+    try { return JSON.parse(localStorage.getItem(LIBKEY) || '{}') || {}; }
+    catch (e) { return {}; }
+  }
+  function libWrite(o) {
+    try { localStorage.setItem(LIBKEY, JSON.stringify(o)); return true; }
+    catch (e) { toast('서식을 저장하지 못했습니다 — 저장 공간이 부족합니다. 「파일↓」로 내보내세요.', 'bad'); return false; }
+  }
+  function libFill(keep) {
+    var lib = libRead(), names = Object.keys(lib).sort();
+    $('#tplSel').innerHTML = '<option value="">서식 선택…</option>' + names.map(function (n) {
+      return '<option value="' + QL.esc(n) + '">' + QL.esc(n) + '</option>';
+    }).join('');
+    if (keep && lib[keep]) $('#tplSel').value = keep;
+  }
+  function libSave() {
+    var cur = $('#tplSel').value;
+    var name = (window.prompt('서식 이름', cur || '내 서식 1') || '').trim();
+    if (!name) return;
+    var lib = libRead();
+    if (lib[name] && !window.confirm('「' + name + '」을(를) 덮어쓸까요?')) return;
+    lib[name] = { set: collect(), elements: S.elements, at: new Date().toISOString().slice(0, 16).replace('T', ' ') };
+    if (libWrite(lib)) { libFill(name); toast('「' + name + '」 저장했습니다.'); }
+  }
+  function libLoad(name) {
+    var lib = libRead(), d = lib[name];
+    if (!d) return;
+    if (d.set) applySettings(d.set);
+    QL.D.mark(function () { S.elements = JSON.parse(JSON.stringify(d.elements)); });
+    S.selIds = [];
+    togglePaperMode(); toggleMargin();
+    changed();
+    toast('「' + name + '」 불러왔습니다.' + (d.at ? ' (' + d.at + ' 저장)' : ''));
+  }
+  function libDel() {
+    var name = $('#tplSel').value;
+    if (!name) { toast('지울 서식을 먼저 고르세요.'); return; }
+    if (!window.confirm('「' + name + '」을(를) 지울까요?')) return;
+    var lib = libRead();
+    delete lib[name];
+    libWrite(lib); libFill(); toast('「' + name + '」 지웠습니다.');
+  }
+
+  /* ---------- 서식 파일 내보내기/가져오기 ---------- */
   function exportTpl() {
     var data = { app: 'label-designer', version: 1, set: collect(), elements: S.elements };
     var blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
@@ -732,6 +820,7 @@ window.QL = window.QL || {};
     window.addEventListener('resize', function () { if ($('#zoom').value === 'fit') applyZoom(); });
 
     // 용지/출력 설정
+    $('#unit').addEventListener('change', function () { applyUnit(QL.U.unit); });
     $('#paperMode').addEventListener('change', togglePaperMode);
     $('#rollPreset').addEventListener('change', applyRollPreset);
     $('#sheetPreset').addEventListener('change', applySheetPreset);
@@ -747,6 +836,9 @@ window.QL = window.QL || {};
       el.addEventListener(el.tagName === 'SELECT' || el.type === 'checkbox' ? 'change' : 'input', changed);
     });
 
+    $('#tplSel').addEventListener('change', function () { if (this.value) libLoad(this.value); });
+    $('#btnTplNew').addEventListener('click', libSave);
+    $('#btnTplDel').addEventListener('click', libDel);
     $('#btnTplSave').addEventListener('click', exportTpl);
     $('#btnTplLoad').addEventListener('click', function () { $('#tplFile').click(); });
     $('#tplFile').addEventListener('change', function (e) { if (e.target.files[0]) importTpl(e.target.files[0]); e.target.value = ''; });
@@ -785,7 +877,12 @@ window.QL = window.QL || {};
     }
     fillPresets();
     bind();
+    libFill();
     var restored = load();
+    QL.U.unit = $('#unit').value === 'in' ? 'in' : 'mm';
+    S.unit = QL.U.unit;
+    $$('.side.left .u').forEach(function (sp) { sp.textContent = QL.U.label(); });
+    MMFIELDS.forEach(function (id) { $('#' + id).step = QL.U.step(); });
     S.snap = $('#snap').checked;
     togglePaperMode();
     toggleMargin();

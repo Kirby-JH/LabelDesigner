@@ -97,7 +97,7 @@ window.QL = window.QL || {};
         name: '텍스트', tpl: '텍스트', x: r2(cx - Math.min(35, label.w * .8) / 2), y: r2(cy - 4),
         w: r2(Math.min(35, label.w * .8)), h: 8,
         font: 'embed', size: 9, bold: false, italic: false, color: '#000000',
-        align: 'center', valign: 'middle', wrap: true, fit: true, lh: 1.15, ls: 0
+        align: 'center', valign: 'middle', wrap: true, fit: true, vertical: false, lh: 1.15, ls: 0
       });
     }
     if (type === 'qr') {
@@ -121,7 +121,7 @@ window.QL = window.QL || {};
       });
     }
     return Object.assign(base, {
-      name: '이미지', x: r2(cx - 9), y: r2(cy - 9), w: 18, h: 18, src: '', fit2: 'contain'
+      name: '이미지', x: r2(cx - 9), y: r2(cy - 9), w: 18, h: 18, src: '', tpl: '', fit2: 'contain'
     });
   };
 
@@ -342,9 +342,18 @@ window.QL = window.QL || {};
   }
 
   /* ---------- 속성 패널 ---------- */
+  var MMPROPS = { x: 1, y: 1, w: 1, h: 1, ls: 1, sw: 1, radius: 1 };
+  function U() { return QL.U.label(); }
+
   function fld(label, prop, type, extra) {
     return '<div class="f"><label>' + label + '</label>' +
       '<input type="' + type + '" data-prop="' + prop + '" ' + (extra || '') + '></div>';
+  }
+  /* 길이 입력칸 — 라벨의 단위와 step 을 현재 단위에 맞춘다 */
+  function lenFld(name, prop, min) {
+    return '<div class="f"><label>' + name + ' (' + U() + ')</label>' +
+      '<input type="number" data-prop="' + prop + '" step="' + QL.U.step() + '"' +
+      (min != null ? ' min="' + QL.U.to(min) + '"' : '') + '></div>';
   }
   function colOptions() {
     var cols = S.headers.map(function (h) {
@@ -383,8 +392,8 @@ window.QL = window.QL || {};
 
     h += '<div class="prop-sec">' +
       '<div class="f"><label>이름</label><input type="text" data-prop="name"></div>' +
-      '<div class="f2">' + fld('X (mm)', 'x', 'number', 'step="0.1"') + fld('Y (mm)', 'y', 'number', 'step="0.1"') + '</div>' +
-      '<div class="f2">' + fld('가로 (mm)', 'w', 'number', 'step="0.1" min="0.5"') + fld('세로 (mm)', 'h', 'number', 'step="0.1" min="0.5"') + '</div>' +
+      '<div class="f2">' + lenFld('X', 'x') + lenFld('Y', 'y') + '</div>' +
+      '<div class="f2">' + lenFld('가로', 'w', 0.5) + lenFld('세로', 'h', 0.5) + '</div>' +
       '<div class="chk"><input type="checkbox" data-prop="locked" id="p_lock">' +
       '<label for="p_lock">잠그기 (캔버스에서 선택·이동 안 됨)</label></div>' +
       '<div class="f2">' + fld('회전 (°)', 'rot', 'number', 'step="1"') +
@@ -394,10 +403,13 @@ window.QL = window.QL || {};
       '<button data-act="full" title="라벨 폭에 맞추기">⤢</button></div></div></div>' +
       '</div>';
 
-    if (el.type === 'text' || el.type === 'qr' || el.type === 'barcode') {
-      h += '<div class="prop-sec"><div class="ttl">내용 (열 이름은 <code>{이름}</code>)</div>' +
-        '<div class="f"><textarea data-prop="tpl" style="min-height:' +
-        (el.type === 'text' ? 54 : 32) + 'px;font-size:11.5px"></textarea></div>' +
+    if (el.type === 'text' || el.type === 'qr' || el.type === 'barcode' || el.type === 'image') {
+      h += '<div class="prop-sec"><div class="ttl">' +
+        (el.type === 'image' ? '그림 경로 — 비워 두면 넣어 둔 그림' : '내용') +
+        ' (열 이름은 <code>{이름}</code>)</div>' +
+        '<div class="f"><textarea data-prop="tpl" placeholder="' +
+        (el.type === 'image' ? '예: img/{품번}.png' : '') +
+        '" style="min-height:' + (el.type === 'text' ? 54 : 32) + 'px;font-size:11.5px"></textarea></div>' +
         '<div class="tpl-row"><select id="insCol"><option value="">열 넣기…</option>' + colOptions() + '</select>' +
         '<button class="btn-s" data-act="ins">삽입</button></div></div>';
     }
@@ -409,7 +421,7 @@ window.QL = window.QL || {};
         '</select></div>' +
         '<div class="f2">' + fld('크기 (pt)', 'size', 'number', 'step="0.5" min="2"') +
         fld('줄 간격', 'lh', 'number', 'step="0.05" min="0.8"') + '</div>' +
-        '<div class="f2">' + fld('자간 (mm)', 'ls', 'number', 'step="0.05"') +
+        '<div class="f2">' + lenFld('자간', 'ls') +
         '<div class="f"><label>색</label><input type="color" data-prop="color"></div></div>' +
         '<div class="f"><label>가로 정렬</label><div class="align-grp">' +
         ['left:좌', 'center:중', 'right:우'].map(function (a) {
@@ -423,6 +435,7 @@ window.QL = window.QL || {};
         }).join('') + '</div></div>' +
         '<div class="chk"><input type="checkbox" data-prop="bold" id="p_bold"><label for="p_bold">굵게</label></div>' +
         '<div class="chk"><input type="checkbox" data-prop="italic" id="p_it"><label for="p_it">기울임</label></div>' +
+        '<div class="chk"><input type="checkbox" data-prop="vertical" id="p_vert"><label for="p_vert">세로쓰기</label></div>' +
         '<div class="chk"><input type="checkbox" data-prop="wrap" id="p_wrap"><label for="p_wrap">자동 줄바꿈</label></div>' +
         '<div class="chk"><input type="checkbox" data-prop="fit" id="p_fit"><label for="p_fit">상자에 맞게 자동 축소</label></div>' +
         '</div>';
@@ -453,8 +466,7 @@ window.QL = window.QL || {};
         '<div class="f2"><div class="f"><label>채우기</label><input type="color" data-prop="fill"></div>' +
         '<div class="f"><label>선 색</label><input type="color" data-prop="stroke"></div></div>' +
         '<div class="chk"><input type="checkbox" id="p_nofill"><label for="p_nofill">채우기 없음</label></div>' +
-        '<div class="f2">' + fld('선 굵기 (mm)', 'sw', 'number', 'step="0.1" min="0"') +
-        fld('모서리 (mm)', 'radius', 'number', 'step="0.5" min="0"') + '</div>' +
+        '<div class="f2">' + lenFld('선 굵기', 'sw', 0) + lenFld('모서리', 'radius', 0) + '</div>' +
         '<p class="hint">선 굵기만 두고 세로를 얇게 하면 구분선이 됩니다.</p></div>';
     }
 
@@ -473,6 +485,7 @@ window.QL = window.QL || {};
       var p = inp.dataset.prop, v = el[p];
       if (inp.type === 'checkbox') inp.checked = !!v;
       else if (inp.type === 'color') inp.value = (v && v !== 'none') ? v : '#000000';
+      else if (MMPROPS[p]) inp.value = v == null ? '' : QL.U.to(v);
       else inp.value = v == null ? '' : v;
     });
     var nf = $('#p_nofill', box);
@@ -492,8 +505,8 @@ window.QL = window.QL || {};
     if (!p) return;
     if (t.type === 'checkbox') el[p] = t.checked;
     else if (t.type === 'number') {
-      var v = parseFloat(t.value);
-      el[p] = isFinite(v) ? v : 0;
+      var v = MMPROPS[p] ? QL.U.from(t.value) : parseFloat(t.value);
+      el[p] = isFinite(v) ? r2(v) : 0;
       if ((p === 'w' || p === 'h') && el[p] < 0.5) el[p] = 0.5;
     } else el[p] = t.value;
     if (p === 'fill' && el.fill !== 'none') { var n = $('#p_nofill'); if (n) n.checked = false; }

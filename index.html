@@ -19,8 +19,13 @@
   </div>
   <span class="stat" id="stat">—</span>
   <span class="grow"></span>
-  <button id="btnTplSave" type="button" title="현재 디자인을 .json 파일로 저장">서식 저장</button>
-  <button id="btnTplLoad" type="button" title="저장한 .json 서식 불러오기">서식 불러오기</button>
+  <span class="tplbar">
+    <select id="tplSel" title="저장해 둔 서식"><option value="">서식 선택…</option></select>
+    <button id="btnTplNew" type="button" title="현재 디자인을 이름 붙여 저장">저장</button>
+    <button id="btnTplDel" type="button" title="선택한 서식 지우기">삭제</button>
+    <button id="btnTplSave" type="button" title="파일(.json)로 내보내기">파일↓</button>
+    <button id="btnTplLoad" type="button" title="파일(.json)에서 가져오기">파일↑</button>
+  </span>
   <input type="file" id="tplFile" accept=".json" hidden>
   <button class="paneltgl" id="tglRight" type="button" title="속성 패널">▦</button>
   <button class="primary" id="btnPrint" type="button">🖨 인쇄 / PDF</button>
@@ -71,6 +76,9 @@
 
     <section>
       <h2>용지</h2>
+      <div class="f"><label>길이 단위</label>
+        <select id="unit"><option value="mm" selected>밀리미터 (mm)</option><option value="in">인치 (in)</option></select>
+      </div>
       <div class="f"><label>용지 종류</label>
         <select id="paperMode">
           <option value="roll" selected>롤 라벨 (연속 용지 · 한 줄 출력)</option>
@@ -81,11 +89,11 @@
       <div id="rollOpts">
         <div class="f"><label>롤 규격 프리셋</label><select id="rollPreset"></select></div>
         <div class="f2">
-          <div class="f"><label>라벨 가로 (mm)</label><input type="number" id="labelW" value="60" step="0.5" min="5"></div>
-          <div class="f"><label>라벨 세로 (mm)</label><input type="number" id="labelH" value="40" step="0.5" min="5"></div>
+          <div class="f"><label>라벨 가로 (<span class="u">mm</span>)</label><input type="number" id="labelW" value="60" step="0.5" min="5"></div>
+          <div class="f"><label>라벨 세로 (<span class="u">mm</span>)</label><input type="number" id="labelH" value="40" step="0.5" min="5"></div>
         </div>
         <div class="f2">
-          <div class="f"><label>라벨 사이 간격 (mm)</label><input type="number" id="rollGap" value="2" step="0.5" min="0"></div>
+          <div class="f"><label>라벨 사이 간격 (<span class="u">mm</span>)</label><input type="number" id="rollGap" value="2" step="0.5" min="0"></div>
           <div class="f"><label>인쇄 방향</label>
             <select id="rotate">
               <option value="0">0°</option><option value="90">90°</option>
@@ -99,20 +107,20 @@
       <div id="sheetOpts" hidden>
         <div class="f"><label>시트 규격 프리셋</label><select id="sheetPreset"></select></div>
         <div class="f2">
-          <div class="f"><label>용지 가로 (mm)</label><input type="number" id="pageW" value="210" step="0.1"></div>
-          <div class="f"><label>용지 세로 (mm)</label><input type="number" id="pageH" value="297" step="0.1"></div>
+          <div class="f"><label>용지 가로 (<span class="u">mm</span>)</label><input type="number" id="pageW" value="210" step="0.1"></div>
+          <div class="f"><label>용지 세로 (<span class="u">mm</span>)</label><input type="number" id="pageH" value="297" step="0.1"></div>
         </div>
         <div class="f2">
           <div class="f"><label>열 수</label><input type="number" id="cols" value="3" min="1" max="30"></div>
           <div class="f"><label>행 수</label><input type="number" id="rows" value="7" min="1" max="40"></div>
         </div>
         <div class="f2">
-          <div class="f"><label>라벨 가로 (mm)</label><input type="number" id="sLabelW" value="63.5" step="0.1"></div>
-          <div class="f"><label>라벨 세로 (mm)</label><input type="number" id="sLabelH" value="38.1" step="0.1"></div>
+          <div class="f"><label>라벨 가로 (<span class="u">mm</span>)</label><input type="number" id="sLabelW" value="63.5" step="0.1"></div>
+          <div class="f"><label>라벨 세로 (<span class="u">mm</span>)</label><input type="number" id="sLabelH" value="38.1" step="0.1"></div>
         </div>
         <div class="f2">
-          <div class="f"><label>가로 간격 (mm)</label><input type="number" id="gapX" value="2.5" step="0.1"></div>
-          <div class="f"><label>세로 간격 (mm)</label><input type="number" id="gapY" value="0" step="0.1"></div>
+          <div class="f"><label>가로 간격 (<span class="u">mm</span>)</label><input type="number" id="gapX" value="2.5" step="0.1"></div>
+          <div class="f"><label>세로 간격 (<span class="u">mm</span>)</label><input type="number" id="gapY" value="0" step="0.1"></div>
         </div>
         <div class="chk"><input type="checkbox" id="autoMargin" checked><label for="autoMargin">여백 자동 (가운데 정렬)</label></div>
         <div class="f2">
@@ -123,8 +131,12 @@
       </div>
 
       <div class="f2">
-        <div class="f"><label>인쇄 보정 ↔ (mm)</label><input type="number" id="offX" value="0" step="0.1"></div>
-        <div class="f"><label>인쇄 보정 ↕ (mm)</label><input type="number" id="offY" value="0" step="0.1"></div>
+        <div class="f"><label>인쇄 범위 시작 (장)</label><input type="number" id="rangeFrom" value="1" min="1"></div>
+        <div class="f"><label>끝 (0 = 끝까지)</label><input type="number" id="rangeTo" value="0" min="0"></div>
+      </div>
+      <div class="f2">
+        <div class="f"><label>인쇄 보정 ↔ (<span class="u">mm</span>)</label><input type="number" id="offX" value="0" step="0.1"></div>
+        <div class="f"><label>인쇄 보정 ↕ (<span class="u">mm</span>)</label><input type="number" id="offY" value="0" step="0.1"></div>
       </div>
       <div class="chk"><input type="checkbox" id="border"><label for="border">라벨 가장자리 선 인쇄</label></div>
     </section>

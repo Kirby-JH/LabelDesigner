@@ -44,6 +44,23 @@ window.QL = window.QL || {};
     { v: 'pharmacode', n: 'Pharmacode' }
   ];
 
+  /* ---------- 길이 단위 ----------
+     값은 언제나 mm 로 보관하고, 화면에 보여 줄 때와 입력받을 때만 바꾼다. */
+  QL.U = {
+    unit: 'mm',
+    to: function (mm) {                        // mm → 화면 값
+      if (!isFinite(mm)) return mm;
+      return this.unit === 'in' ? Math.round(mm / 25.4 * 10000) / 10000 : Math.round(mm * 100) / 100;
+    },
+    from: function (v) {                       // 화면 값 → mm
+      v = parseFloat(v);
+      if (!isFinite(v)) return NaN;
+      return Math.round((this.unit === 'in' ? v * 25.4 : v) * 100) / 100;
+    },
+    label: function () { return this.unit === 'in' ? 'in' : 'mm'; },
+    step: function () { return this.unit === 'in' ? '0.001' : '0.1'; }
+  };
+
   QL.esc = function (s) {
     return String(s == null ? '' : s).replace(/[&<>"']/g, function (c) {
       return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
@@ -211,11 +228,13 @@ window.QL = window.QL || {};
   var MM2PX = 96 / 25.4, PT2PX = 96 / 72;
 
   QL.fitFontSize = function (text, el, wMM, hMM) {
-    var key = [text, el.font, el.bold, el.italic, el.size, el.wrap, el.lh, wMM, hMM].join('\u0001');
+    var key = [text, el.font, el.bold, el.italic, el.size, el.wrap, el.lh, el.vertical, wMM, hMM].join('\u0001');
     if (key in fitCache) return fitCache[key];
     var ctx = measureCtx();
     var fam = QL.fontCss(el.font);
-    var boxW = wMM * MM2PX, boxH = hMM * MM2PX;
+    /* 세로쓰기는 글줄이 세로로 흐르므로 재는 축을 맞바꾼다 */
+    var boxW = (el.vertical ? hMM : wMM) * MM2PX;
+    var boxH = (el.vertical ? wMM : hMM) * MM2PX;
     var lh = el.lh || 1.15;
 
     /* 주어진 크기에서 줄 수와 가장 긴 줄 너비를 센다.
@@ -293,7 +312,10 @@ window.QL = window.QL || {};
         'font-weight:' + (el.bold ? 700 : 400) + ';' + (el.italic ? 'font-style:italic;' : '') +
         'color:' + (el.color || '#000') + ';line-height:' + (el.lh || 1.15) + ';' +
         (el.ls ? 'letter-spacing:' + el.ls + 'mm;' : '') +
-        'text-align:' + (el.align || 'left') + ';width:100%;' +
+        'text-align:' + (el.align || 'left') + ';' +
+        (el.vertical
+          ? 'writing-mode:vertical-rl;text-orientation:upright;height:100%;width:auto;'
+          : 'width:100%;') +
         (el.wrap ? 'white-space:pre-wrap;overflow-wrap:anywhere;' : 'white-space:pre;') +
         '">' + QL.esc(txt) + '</div></div>';
 
@@ -327,9 +349,15 @@ window.QL = window.QL || {};
         (el.radius ? 'border-radius:' + el.radius + 'mm;' : '') + '"></div>';
 
     } else if (el.type === 'image') {
-      inner = el.src
-        ? '<div class="inner"><img src="' + el.src + '" style="width:100%;height:100%;object-fit:' +
-          (el.fit2 || 'contain') + '" alt=""></div>'
+      /* 내용에 {열이름} 을 넣으면 행마다 다른 그림을 쓴다. 비어 있으면 넣어 둔 그림. */
+      var src = el.src;
+      if (el.tpl) {
+        var r = QL.resolve(el.tpl, row, headers, ctx).trim();
+        if (r && r.indexOf('{') < 0) src = r;
+      }
+      inner = src
+        ? '<div class="inner"><img src="' + styleSafe(src) + '" style="width:100%;height:100%;object-fit:' +
+          (el.fit2 || 'contain') + '" alt="" onerror="this.style.display=\'none\'"></div>'
         : '<div class="inner" style="align-items:center;justify-content:center"><span class="err">이미지 없음</span></div>';
     }
 
@@ -364,7 +392,7 @@ window.QL = window.QL || {};
           '<div class="slot" style="left:' + o.offX + 'mm;top:' + o.offY + 'mm;width:' + o.labelW +
           'mm;height:' + o.labelH + 'mm;' + (tf ? 'transform:' + tf + ';transform-origin:0 0;' : '') + '">' +
           QL.labelHtml(o.elements, items[i].row, o.headers,
-            { seq: i + 1, rowNo: items[i].rowNo }) + '</div></div></div>');
+            { seq: (o.seqOffset || 0) + i + 1, rowNo: items[i].rowNo }) + '</div></div></div>');
       }
       return { html: html.join(''), pages: n, pw: pw, ph: ph, limited: limited, shown: count };
     }
@@ -390,7 +418,7 @@ window.QL = window.QL || {};
         html.push('<div class="slot" style="left:' + x + 'mm;top:' + y + 'mm;width:' + o.labelW +
           'mm;height:' + o.labelH + 'mm">' +
           QL.labelHtml(o.elements, items[idx].row, o.headers,
-            { seq: idx + 1, rowNo: items[idx].rowNo }) + '</div>');
+            { seq: (o.seqOffset || 0) + idx + 1, rowNo: items[idx].rowNo }) + '</div>');
         idx++;
       }
       html.push('</div></div>');

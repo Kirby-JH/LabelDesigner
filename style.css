@@ -24,6 +24,8 @@ code{background:#eef2f7; padding:0 3px; border-radius:3px; font-size:11px}
 .top .stat{font-size:12px; color:var(--muted)}
 .top .stat b{color:var(--text)}
 
+.tplbar{display:flex; gap:4px; align-items:center}
+.tplbar select{width:auto; max-width:150px; padding:4px 6px}
 .segs{display:inline-flex; border:1px solid var(--line); border-radius:6px; overflow:hidden}
 .segs button{border:0; background:#fff; padding:5px 13px; font:inherit; font-size:12px; cursor:pointer}
 .segs button+button{border-left:1px solid var(--line)}
@@ -214,7 +216,7 @@ table.dt tbody tr.dupe td.n{color:#b45309; font-weight:700}
   .side{width:min(320px, 92vw); flex-basis:auto}
   .brand{font-size:13px}
   .top{gap:6px; padding:0 8px}
-  #btnTplSave,#btnTplLoad{display:none}
+  .tplbar{display:none}
   .stagewrap{padding:14px}
   .ctoolbar{gap:4px; padding:6px 8px}
   .ctoolbar .lbl{display:none}
