@@ -19,6 +19,15 @@ window.QL = window.QL || {};
   };
   var workbook = null, previewDirty = true, view = 'design', redrawT = null, printHost = null;
 
+  /* 글꼴이 다 도착한 뒤에 인쇄해야 대체 글꼴로 찍히지 않는다 */
+  function whenFontsReady(cb) {
+    if (!document.fonts || !document.fonts.ready) { cb(); return; }
+    var done = false;
+    var go = function () { if (!done) { done = true; cb(); } };
+    document.fonts.ready.then(go, go);
+    setTimeout(go, 4000);                        // 혹시 응답이 없어도 인쇄는 되게
+  }
+
   function restoreAfterPrint() {
     if (!printHost) return;
     printHost.appendChild($('#pages'));
@@ -289,6 +298,7 @@ window.QL = window.QL || {};
     previewDirty = true;
     clearTimeout(redrawT);
     redrawT = setTimeout(function () {
+      if (QL.usesEmbed(S.elements)) ensureFontCss();
       syncLabelSize();
       applyZoom();
       QL.D.draw();
@@ -439,14 +449,14 @@ window.QL = window.QL || {};
       { id: 'd1', type: 'qr', name: 'QR', tpl: '{1}', x: 2, y: 2, w: r2(q), h: r2(q),
         ecc: 'M', quiet: 2, color: '#000000', rot: 0 },
       { id: 'd2', type: 'text', name: '품명', tpl: '{2}', x: r2(q + 4), y: 2, w: r2(w - q - 6), h: 9,
-        font: 'sans', size: 10, bold: true, italic: false, color: '#000000',
+        font: 'embed', size: 10, bold: true, italic: false, color: '#000000',
         align: 'left', valign: 'top', wrap: true, fit: true, lh: 1.15, ls: 0, rot: 0 },
       { id: 'd3', type: 'text', name: '보조', tpl: '{3}', x: r2(q + 4), y: 12, w: r2(w - q - 6), h: 6,
-        font: 'sans', size: 8, bold: false, italic: false, color: '#000000',
+        font: 'embed', size: 8, bold: false, italic: false, color: '#000000',
         align: 'left', valign: 'top', wrap: false, fit: true, lh: 1.15, ls: 0, rot: 0 },
       { id: 'd4', type: 'barcode', name: '바코드', tpl: '{1}', x: 2, y: r2(q + 4),
         w: r2(w - 4), h: r2(h - q - 6), fmt: 'CODE128', hri: true, hriSize: 6, quiet: 10,
-        font: 'sans', color: '#000000', rot: 0 }
+        font: 'embed', color: '#000000', rot: 0 }
     ];
   }
 
@@ -487,6 +497,19 @@ window.QL = window.QL || {};
     $('#sheetOpts').hidden = roll;
     changed();
   }
+
+  /* ---------- 내장 글꼴 ----------
+     글꼴 CSS(와 woff2)는 '내장 글꼴'을 실제로 쓸 때만 끼워 넣는다. */
+  var fontCssOn = false;
+  function ensureFontCss() {
+    if (fontCssOn) return;
+    fontCssOn = true;
+    var l = document.createElement('link');
+    l.rel = 'stylesheet';
+    l.href = 'vendor/fonts/pretendard.css';
+    document.head.appendChild(l);
+  }
+  QL.ensureFontCss = ensureFontCss;
 
   /* ---------- 알림 ---------- */
   var toastT = null;
@@ -731,7 +754,9 @@ window.QL = window.QL || {};
     $('#btnPrint').addEventListener('click', function () {
       setView('preview');
       ensurePreview();
-      setTimeout(function () { window.print(); setTimeout(restoreAfterPrint, 300); }, 60);
+      whenFontsReady(function () {
+        setTimeout(function () { window.print(); setTimeout(restoreAfterPrint, 300); }, 60);
+      });
     });
     // 인쇄 중에는 #pages 를 body 직속으로 옮겨 조상 레이아웃의 영향을 없앤다
     window.addEventListener('beforeprint', function () {
@@ -746,7 +771,9 @@ window.QL = window.QL || {};
     document.addEventListener('keydown', function (e) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
         e.preventDefault(); setView('preview'); ensurePreview();
-        setTimeout(function () { window.print(); setTimeout(restoreAfterPrint, 300); }, 60);
+        whenFontsReady(function () {
+          setTimeout(function () { window.print(); setTimeout(restoreAfterPrint, 300); }, 60);
+        });
       }
     });
   }
@@ -767,6 +794,14 @@ window.QL = window.QL || {};
     if (!restored || !S.elements.length) seedDefault();
     if ($('#pasteArea').value.trim()) setTable(parsePasted($('#pasteArea').value));
     else setTable([]);
+    if (document.fonts && document.fonts.addEventListener) {
+      document.fonts.addEventListener('loadingdone', function () {
+        QL.clearFitCache();                      // 새 글꼴 기준으로 다시 재서 그린다
+        QL.D.draw();
+        previewDirty = true;
+        if (view === 'preview') buildPreview();
+      });
+    }
     setView('design');
     changed();
     QL.D.resetHistory();

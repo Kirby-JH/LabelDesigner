@@ -96,7 +96,7 @@ window.QL = window.QL || {};
       return Object.assign(base, {
         name: '텍스트', tpl: '텍스트', x: r2(cx - Math.min(35, label.w * .8) / 2), y: r2(cy - 4),
         w: r2(Math.min(35, label.w * .8)), h: 8,
-        font: 'sans', size: 9, bold: false, italic: false, color: '#000000',
+        font: 'embed', size: 9, bold: false, italic: false, color: '#000000',
         align: 'center', valign: 'middle', wrap: true, fit: true, lh: 1.15, ls: 0
       });
     }
@@ -111,7 +111,7 @@ window.QL = window.QL || {};
       var bw = Math.min(45, label.w * .8), bh = Math.min(14, label.h * .4);
       return Object.assign(base, {
         name: '바코드', tpl: '{1}', x: r2(cx - bw / 2), y: r2(cy - bh / 2), w: r2(bw), h: r2(bh),
-        fmt: 'CODE128', hri: true, hriSize: 6, quiet: 10, font: 'sans', color: '#000000'
+        fmt: 'CODE128', hri: true, hriSize: 6, quiet: 10, font: 'embed', color: '#000000'
       });
     }
     if (type === 'box') {

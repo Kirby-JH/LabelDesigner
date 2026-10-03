@@ -10,7 +10,10 @@ window.QL = window.QL || {};
   /* 글꼴 이름은 반드시 작은따옴표로 감쌀 것.
      style="..." 안에 그대로 들어가므로 큰따옴표를 쓰면 속성이 중간에서 끊긴다. */
   QL.FONTS = [
-    { v: 'sans', n: '산세리프(기본)', css: "'Pretendard','Malgun Gothic','Noto Sans KR',system-ui,sans-serif" },
+    /* 'embed' 는 vendor/fonts 에 함께 넣어 둔 Pretendard. 어느 PC에서 열어도 같은 모양이다.
+       실제로 쓰일 때만 app.js 가 글꼴 CSS 를 끼워 넣는다. */
+    { v: 'embed', n: '내장 Pretendard (어디서나 동일)', css: "'Pretendard','Malgun Gothic',sans-serif", embed: true },
+    { v: 'sans', n: '산세리프(설치된 글꼴)', css: "'Pretendard','Malgun Gothic','Noto Sans KR',system-ui,sans-serif" },
     { v: 'gothic', n: '맑은 고딕', css: "'Malgun Gothic','맑은 고딕','Noto Sans KR',sans-serif" },
     { v: 'dotum', n: '돋움', css: "Dotum,'돋움',Gulim,sans-serif" },
     { v: 'batang', n: '바탕(명조)', css: "Batang,'바탕','Noto Serif KR',serif" },
@@ -18,7 +21,10 @@ window.QL = window.QL || {};
   ];
   QL.fontCss = function (v) {
     for (var i = 0; i < QL.FONTS.length; i++) if (QL.FONTS[i].v === v) return QL.FONTS[i].css;
-    return QL.FONTS[0].css;
+    return QL.FONTS[1].css;                      // 못 찾으면 시스템 산세리프
+  };
+  QL.usesEmbed = function (elements) {
+    return (elements || []).some(function (e) { return e.font === 'embed'; });
   };
   /* style="..." 에 넣기 전 큰따옴표를 한 번 더 막아 둔다 */
   function styleSafe(v) { return String(v == null ? '' : v).replace(/"/g, "'"); }
@@ -196,6 +202,8 @@ window.QL = window.QL || {};
 
   /* ---------- 상자에 맞춰 글자 크기 줄이기 ---------- */
   var mctx = null, fitCache = {};
+  /* 글꼴이 늦게 도착하면 글자 폭이 달라지므로 측정값을 버리고 다시 잰다 */
+  QL.clearFitCache = function () { fitCache = {}; };
   function measureCtx() {
     if (!mctx) mctx = document.createElement('canvas').getContext('2d');
     return mctx;
