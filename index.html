@@ -130,10 +130,17 @@
         <div class="f"><label>시작 칸 번호</label><input type="number" id="startAt" value="1" min="1"></div>
       </div>
 
+      <div class="f"><label>출력 범위 기준</label>
+        <select id="rangeBy">
+          <option value="row" selected>데이터 행 번호</option>
+          <option value="label">라벨 장수</option>
+        </select>
+      </div>
       <div class="f2">
-        <div class="f"><label>인쇄 범위 시작 (장)</label><input type="number" id="rangeFrom" value="1" min="1"></div>
+        <div class="f"><label>시작</label><input type="number" id="rangeFrom" value="1" min="1"></div>
         <div class="f"><label>끝 (0 = 끝까지)</label><input type="number" id="rangeTo" value="0" min="0"></div>
       </div>
+      <p class="hint" id="rangeInfo"></p>
       <div class="f2">
         <div class="f"><label>인쇄 보정 ↔ (<span class="u">mm</span>)</label><input type="number" id="offX" value="0" step="0.1"></div>
         <div class="f"><label>인쇄 보정 ↕ (<span class="u">mm</span>)</label><input type="number" id="offY" value="0" step="0.1"></div>

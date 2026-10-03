@@ -371,7 +371,7 @@ window.QL = window.QL || {};
   };
 
   /* ---------- 페이지 생성 ---------- */
-  QL.MAX_LABELS = 1000;
+  QL.MAX_LABELS = 5000;
 
   QL.buildPages = function (o) {
     var items = o.items, n = items.length, html = [], i;

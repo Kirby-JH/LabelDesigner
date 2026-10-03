@@ -156,21 +156,42 @@ window.QL = window.QL || {};
     sel.value = String(Math.min(S.sampleRow, max - 1));
   }
 
-  /* ---------- 인쇄 항목 ---------- */
-  function buildItems() {
+  /* ---------- 인쇄 항목 ----------
+     수만 행이 들어와도 범위 밖 행은 수량만 세고 넘어간다.
+     실제 항목 객체는 출력할 구간에 대해서만 만든다. */
+  function rangeSpec() {
+    var by = $('#rangeBy') ? $('#rangeBy').value : 'label';
+    var from = Math.max(1, parseInt($('#rangeFrom').value, 10) || 1);
+    var to = parseInt($('#rangeTo').value, 10) || 0;
+    return { by: by, from: from, to: to > 0 ? to : Infinity };
+  }
+
+  function collectItems() {
     var qi = parseInt($('#colQty').value, 10);
     var rep = Math.max(1, parseInt($('#repeat').value, 10) || 1);
     var dedupe = $('#dedupe').checked, skipEmpty = $('#skipEmpty').checked;
-    var items = [], seen = {}, dup = 0, skip = 0;
+    var sp = rangeSpec();
+    var out = {
+      items: [], seqOffset: 0, dup: 0, skip: 0,
+      totalLabels: 0, totalRows: 0, usedRows: 0,
+      rowFrom: 0, rowTo: 0, by: sp.by
+    };
 
-    if (!S.rows.length) {
-      for (var k = 0; k < rep; k++) items.push({ row: null, rowNo: 1 });
-      return { items: items, dup: 0, skip: 0 };
+    if (!S.rows.length) {                        // 데이터 없이 고정 내용만
+      for (var k = 0; k < rep; k++) out.items.push({ row: null, rowNo: 1 });
+      out.totalLabels = out.items.length;
+      return out;
     }
-    S.rows.forEach(function (row, rowIdx) {
+
+    var seen = dedupe ? {} : null;
+    var seq = 0;                                 // 지금까지 센 라벨 수
+    S.rows.forEach(function (row, idx) {
+      var rowNo = idx + 1;
+      out.totalRows = rowNo;
       var joined = row.join('\u0001');
-      if (skipEmpty && joined.replace(/\u0001/g, '').trim() === '') { skip++; return; }
-      if (dedupe) { if (seen[joined]) { dup++; return; } seen[joined] = 1; }
+      if (skipEmpty && joined.replace(/\u0001/g, '').trim() === '') { out.skip++; return; }
+      if (dedupe) { if (seen[joined]) { out.dup++; return; } seen[joined] = 1; }
+
       var qty = 1;
       if (qi >= 0) {
         var q = parseInt(String(row[qi]).replace(/[^0-9\-]/g, ''), 10);
@@ -179,9 +200,28 @@ window.QL = window.QL || {};
       qty *= rep;
       if (qty < 1) return;
       if (qty > 2000) qty = 2000;
-      for (var i = 0; i < qty; i++) items.push({ row: row, rowNo: rowIdx + 1 });
+      out.usedRows++;
+      out.totalLabels += qty;
+
+      var take = 0, skipHead = 0;
+      if (sp.by === 'row') {
+        if (rowNo < sp.from) { seq += qty; out.seqOffset = seq; return; }
+        if (rowNo > sp.to) { seq += qty; return; }
+        take = qty;
+      } else {                                   // 라벨 장수 기준
+        var first = seq + 1, last = seq + qty;
+        if (last < sp.from) { seq += qty; out.seqOffset = seq; return; }
+        if (first > sp.to) { seq += qty; return; }
+        skipHead = Math.max(0, sp.from - first);
+        take = Math.min(qty, sp.to - first + 1) - skipHead;
+        if (!out.items.length) out.seqOffset = seq + skipHead;
+      }
+      if (!out.rowFrom) out.rowFrom = rowNo;
+      out.rowTo = rowNo;
+      for (var i = 0; i < take; i++) out.items.push({ row: row, rowNo: rowNo });
+      seq += qty;
     });
-    return { items: items, dup: dup, skip: skip };
+    return out;
   }
 
   /* ---------- 데이터 검증 · 표 ---------- */
@@ -216,11 +256,11 @@ window.QL = window.QL || {};
     return out;
   }
 
-  function drawTable() {
+  function drawTable(v) {
     var wrap = $('#dataTable');
     if (wrap.hidden) return;
     if (!S.rows.length) { wrap.innerHTML = '<p class="hint" style="padding:8px">데이터가 없습니다.</p>'; return; }
-    var v = validateRows();
+    v = v || validateRows();
     var max = Math.min(S.rows.length, TABLE_MAX);
     var h = '<table class="dt"><thead><tr><th>#</th>' +
       S.headers.map(function (x) { return '<th>' + QL.esc(x) + '</th>'; }).join('') + '</tr></thead><tbody>';
@@ -236,26 +276,16 @@ window.QL = window.QL || {};
     wrap.innerHTML = h;
   }
 
-  function drawWarn() {
+  function drawWarn(v) {
     var el = $('#dataWarn');
     if (!S.rows.length) { el.hidden = true; return; }
-    var v = validateRows();
+    v = v || validateRows();
     var rows = Object.keys(v.prob).map(function (i) { return +i + 1; });
     if (!rows.length) { el.hidden = true; return; }
     var head = rows.slice(0, 8).join(', ') + (rows.length > 8 ? ' 외 ' + (rows.length - 8) + '행' : '');
     el.hidden = false;
     el.innerHTML = '바코드 형식 오류 <b>' + rows.length + '행</b> — ' + head +
       '<br><span style="opacity:.8">' + QL.esc(v.prob[rows[0] - 1][0]) + '</span>';
-  }
-
-  /* 출력할 구간만 잘라 낸다. 일련번호는 원래 순서를 그대로 이어 간다. */
-  function applyRange(all) {
-    var from = Math.max(1, parseInt($('#rangeFrom').value, 10) || 1);
-    var to = parseInt($('#rangeTo').value, 10) || 0;
-    if (to <= 0 || to > all.length) to = all.length;
-    if (from > all.length) from = all.length || 1;
-    if (to < from) to = from;
-    return { items: all.slice(from - 1, to), offset: from - 1, from: from, to: to, total: all.length };
   }
 
   /* ---------- 용지 ---------- */
@@ -328,24 +358,36 @@ window.QL = window.QL || {};
   QL.changed = changed;
 
   function updateStat() {
-    drawWarn();
-    drawTable();
-    var res = buildItems(), o = paperOpts();
-    var rg = applyRange(res.items);
-    var n = rg.items.length;
+    var v = S.rows.length ? validateRows() : null;   // 한 번만 검사해 두 곳에서 쓴다
+    drawWarn(v);
+    drawTable(v);
+    var c = collectItems(), o = paperOpts();
+    var n = c.items.length;
     var pages = o.mode === 'roll' ? n
       : Math.ceil((n + (o.startAt % (o.cols * o.rows))) / (o.cols * o.rows));
-    $('#stat').innerHTML = '라벨 <b>' + n + '</b>장 · 페이지 <b>' + (n ? pages : 0) + '</b>장' +
-      (rg.total !== n ? ' <span style="opacity:.7">(전체 ' + rg.total + '장 중 ' +
-        rg.from + '~' + rg.to + ')</span>' : '');
+    $('#stat').innerHTML = '라벨 <b>' + n.toLocaleString() + '</b>장 · 페이지 <b>' +
+      (n ? pages.toLocaleString() : 0) + '</b>장';
+
+    var info = $('#rangeInfo');
+    if (!S.rows.length) info.textContent = '';
+    else if (c.by === 'row') {
+      info.innerHTML = '전체 <b>' + c.totalRows.toLocaleString() + '행</b> 중 ' +
+        (n ? c.rowFrom.toLocaleString() + '~' + c.rowTo.toLocaleString() + '행' : '해당 행 없음') +
+        ' → 라벨 ' + n.toLocaleString() + '장 (전체 ' + c.totalLabels.toLocaleString() + '장)';
+    } else {
+      info.innerHTML = '전체 라벨 <b>' + c.totalLabels.toLocaleString() + '장</b> 중 ' +
+        (n ? (c.seqOffset + 1).toLocaleString() + '~' + (c.seqOffset + n).toLocaleString() + '장' : '없음');
+    }
+
     var sum = $('#dataSummary');
     if (!S.rows.length) {
       sum.className = 'note';
       sum.textContent = '데이터가 없어 고정 내용으로 ' + n + '장만 만듭니다.';
     } else {
-      var m = '데이터 <b>' + S.rows.length + '</b>행 → 라벨 <b>' + n + '</b>장';
-      if (res.dup) m += ' · 중복 제외 ' + res.dup;
-      if (res.skip) m += ' · 빈 행 ' + res.skip;
+      var m = '데이터 <b>' + c.totalRows.toLocaleString() + '</b>행 → 라벨 <b>' +
+        c.totalLabels.toLocaleString() + '</b>장';
+      if (c.dup) m += ' · 중복 제외 ' + c.dup;
+      if (c.skip) m += ' · 빈 행 ' + c.skip;
       sum.className = 'note'; sum.innerHTML = m;
     }
   }
@@ -379,10 +421,9 @@ window.QL = window.QL || {};
   /* ---------- 미리보기 ---------- */
   function buildPreview() {
     var o = syncLabelSize();
-    var res = buildItems();
-    var rg = applyRange(res.items);
-    o.items = rg.items;
-    o.seqOffset = rg.offset;
+    var c = collectItems();
+    o.items = c.items;
+    o.seqOffset = c.seqOffset;
     o.elements = S.elements;
     o.headers = S.headers;
     var out = QL.buildPages(o);
@@ -390,9 +431,10 @@ window.QL = window.QL || {};
     document.documentElement.style.setProperty('--ph', out.ph + 'mm');
     $('#pageRule').textContent = '@page{size:' + out.pw + 'mm ' + out.ph + 'mm;margin:0}';
     $('#pages').innerHTML = out.html +
-      (out.limited ? '<p class="more">라벨이 많아 ' + QL.MAX_LABELS + '장까지만 만들었습니다. (전체 ' +
-        res.items.length + '장) — 데이터를 나누어 출력하세요.</p>' : '') +
-      (rg.items.length ? '' : '<p class="more">출력할 라벨이 없습니다.</p>');
+      (out.limited ? '<p class="more">한 번에 ' + QL.MAX_LABELS.toLocaleString() +
+        '장까지만 만듭니다. (선택한 범위 ' + c.items.length.toLocaleString() +
+        '장) — 위의 <b>출력 범위</b>로 나누어 뽑으세요.</p>' : '') +
+      (c.items.length ? '' : '<p class="more">출력할 라벨이 없습니다.</p>');
     previewDirty = false;
     applyZoom();
   }
@@ -411,7 +453,7 @@ window.QL = window.QL || {};
   /* ---------- 저장/복원 ---------- */
   var IDS = ['hasHeader', 'colQty', 'repeat', 'skipEmpty', 'dedupe', 'paperMode', 'rollPreset',
     'labelW', 'labelH', 'rollGap', 'rotate', 'sheetPreset', 'pageW', 'pageH', 'cols', 'rows',
-    'sLabelW', 'sLabelH', 'gapX', 'gapY', 'autoMargin', 'marginL', 'marginT', 'startAt', 'rangeFrom', 'rangeTo',
+    'sLabelW', 'sLabelH', 'gapX', 'gapY', 'autoMargin', 'marginL', 'marginT', 'startAt', 'rangeBy', 'rangeFrom', 'rangeTo',
     'offX', 'offY', 'border', 'snap', 'unit'];
   var KEY = 'labeldesigner.v1';
 
@@ -425,27 +467,32 @@ window.QL = window.QL || {};
   }
   var saveWarned = false;
   function save() {
-    var payload;
+    var base = { set: collect(), elements: S.elements };
+    var paste = $('#pasteArea').value;
+    function put(withPaste) {
+      base.paste = withPaste ? paste : '';
+      localStorage.setItem(KEY, JSON.stringify(base));
+    }
+    try { put(true); saveWarned = false; return; }
+    catch (e) { /* 아래에서 데이터를 빼고 다시 */ }
     try {
-      payload = JSON.stringify({
-        set: collect(), elements: S.elements, paste: $('#pasteArea').value.slice(0, 200000)
-      });
-    } catch (e) { return; }
-    try {
-      localStorage.setItem(KEY, payload);
-      saveWarned = false;
-    } catch (e) {
-      /* 대개 용량 초과 — 이미지 요소의 data URL 이 원인인 경우가 많다 */
+      put(false);
+      if (!saveWarned) {
+        saveWarned = true;
+        toast('데이터가 커서(' + Math.round(paste.length / 1024) +
+          'KB) 자동 저장에서 제외했습니다. 디자인·설정은 저장되니, 다시 열 때 데이터만 새로 넣으세요.', 'bad');
+      }
+    } catch (e2) {
       if (saveWarned) return;
       saveWarned = true;
       var imgKB = 0;
       S.elements.forEach(function (el) { if (el.type === 'image' && el.src) imgKB += el.src.length / 1024; });
-      toast('자동 저장 실패 — 브라우저 저장 공간을 넘었습니다 (' +
-        Math.round(payload.length / 1024) + 'KB' +
-        (imgKB > 200 ? ', 이미지 ' + Math.round(imgKB) + 'KB' : '') +
-        '). 지금 \u300c서식 저장\u300d으로 파일에 보관하세요.', 'bad');
+      toast('자동 저장 실패 — 브라우저 저장 공간을 넘었습니다' +
+        (imgKB > 200 ? ' (이미지 ' + Math.round(imgKB) + 'KB)' : '') +
+        '. 지금 「저장」이나 「파일↓」로 보관하세요.', 'bad');
     }
   }
+
   function applySettings(o) {
     IDS.forEach(function (id) {
       if (!(id in o)) return;
