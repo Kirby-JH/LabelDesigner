@@ -116,7 +116,10 @@ textarea{resize:vertical; min-height:92px; font-family:ui-monospace,Menlo,Consol
 .h-sw{cursor:nesw-resize} .h-se{cursor:nwse-resize}
 .h-n{cursor:ns-resize} .h-s{cursor:ns-resize}
 .h-w{cursor:ew-resize} .h-e{cursor:ew-resize}
-.guideline{position:absolute; background:#f43f5e; z-index:45; pointer-events:none}
+.guideline{position:absolute; background:#f43f5e; z-index:60; pointer-events:none}
+.marquee{position:absolute; z-index:55; pointer-events:none;
+  border:1px solid var(--sel); background:rgba(37,99,235,.10)}
+.selbox{position:absolute; outline:1.2px dashed var(--sel); outline-offset:0; pointer-events:none}
 
 /* ---- 레이어 목록 ---- */
 .layers{list-style:none; margin:0; padding:0; max-height:210px; overflow:auto}

@@ -43,7 +43,9 @@ window.QL = window.QL || {};
 
   function apply(json) {
     S.elements = JSON.parse(json);
-    if (!S.elements.some(function (e) { return e.id === S.selId; })) S.selId = null;
+    S.selIds = S.selIds.filter(function (id) {
+      return S.elements.some(function (e) { return e.id === id; });
+    });
     D.draw();
     D.onChange();
   }
@@ -128,45 +130,127 @@ window.QL = window.QL || {};
     var el = D.newEl(type, S.label);
     if (src) el.src = src;
     S.elements.push(el);
-    S.selId = el.id;
+    S.selIds = [el.id];
     commit();
     D.draw();
     D.onChange();
   };
 
-  D.sel = function () {
-    for (var i = 0; i < S.elements.length; i++) if (S.elements[i].id === S.selId) return S.elements[i];
-    return null;
+  /* ---------- 선택 (다중) ---------- */
+  function isSel(id) { return S.selIds.indexOf(id) >= 0; }
+  D.isSel = isSel;
+  D.selAll = function () { return S.elements.filter(function (e) { return isSel(e.id); }); };
+  /* 속성 패널은 하나만 골랐을 때 */
+  D.sel = function () { var a = D.selAll(); return a.length === 1 ? a[0] : null; };
+  D.select = function (id, additive) {
+    if (!id) S.selIds = [];
+    else if (additive) {
+      var i = S.selIds.indexOf(id);
+      if (i >= 0) S.selIds.splice(i, 1); else S.selIds.push(id);
+    } else S.selIds = [id];
+    D.draw();
   };
-  D.select = function (id) { S.selId = id; D.draw(); };
+
+  /* 회전을 반영한 요소 하나의 외곽 상자 */
+  function elBBox(el) {
+    var cx = el.x + el.w / 2, cy = el.y + el.h / 2;
+    var rad = (el.rot || 0) * Math.PI / 180, co = Math.cos(rad), si = Math.sin(rad);
+    var hw = el.w / 2, hh = el.h / 2;
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    [[-hw, -hh], [hw, -hh], [hw, hh], [-hw, hh]].forEach(function (q) {
+      var x = cx + q[0] * co - q[1] * si, y = cy + q[0] * si + q[1] * co;
+      if (x < x0) x0 = x; if (x > x1) x1 = x;
+      if (y < y0) y0 = y; if (y > y1) y1 = y;
+    });
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
+  D.elBBox = elBBox;
+
+  function selBBox() {
+    var a = D.selAll();
+    if (!a.length) return null;
+    var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    a.forEach(function (el) {
+      var b = elBBox(el);
+      if (b.x < x0) x0 = b.x; if (b.x + b.w > x1) x1 = b.x + b.w;
+      if (b.y < y0) y0 = b.y; if (b.y + b.h > y1) y1 = b.y + b.h;
+    });
+    return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
+  }
 
   D.remove = function () {
-    var i = S.elements.findIndex(function (e) { return e.id === S.selId; });
-    if (i < 0) return;
+    if (!S.selIds.length) return;
     begin();
-    S.elements.splice(i, 1);
-    S.selId = S.elements.length ? S.elements[Math.min(i, S.elements.length - 1)].id : null;
+    var first = S.elements.findIndex(function (e) { return isSel(e.id); });
+    S.elements = S.elements.filter(function (e) { return !isSel(e.id); });
+    S.selIds = S.elements.length ? [S.elements[Math.min(first, S.elements.length - 1)].id] : [];
     commit(); D.draw(); D.onChange();
   };
   D.duplicate = function () {
-    var e = D.sel(); if (!e) return;
+    var list = D.selAll(); if (!list.length) return;
     begin();
-    var c = JSON.parse(JSON.stringify(e));
-    SEQ++; c.id = 'e' + Date.now().toString(36) + SEQ;
-    c.x = r2(Math.min(c.x + 2, S.label.w - 2)); c.y = r2(Math.min(c.y + 2, S.label.h - 2));
-    S.elements.push(c); S.selId = c.id; commit(); D.draw(); D.onChange();
+    var ids = [];
+    list.forEach(function (e) {
+      var c = JSON.parse(JSON.stringify(e));
+      SEQ++; c.id = 'e' + Date.now().toString(36) + SEQ;
+      c.x = r2(Math.min(c.x + 2, S.label.w - 2));
+      c.y = r2(Math.min(c.y + 2, S.label.h - 2));
+      S.elements.push(c); ids.push(c.id);
+    });
+    S.selIds = ids;
+    commit(); D.draw(); D.onChange();
   };
   function move(dir) {
-    var i = S.elements.findIndex(function (e) { return e.id === S.selId; });
-    if (i < 0) return;
+    if (!S.selIds.length) return;
     begin();
-    var e = S.elements.splice(i, 1)[0];
-    if (dir === 'front') S.elements.push(e);
-    else if (dir === 'back') S.elements.unshift(e);
-    else S.elements.splice(Math.max(0, Math.min(S.elements.length, i + dir)), 0, e);
+    if (dir === 'front' || dir === 'back') {
+      var picked = S.elements.filter(function (e) { return isSel(e.id); });
+      var rest = S.elements.filter(function (e) { return !isSel(e.id); });
+      S.elements = dir === 'front' ? rest.concat(picked) : picked.concat(rest);
+    } else {
+      var i = S.elements.findIndex(function (e) { return isSel(e.id); });
+      if (i < 0) { hist.pending = null; return; }
+      var e = S.elements.splice(i, 1)[0];
+      S.elements.splice(Math.max(0, Math.min(S.elements.length, i + dir)), 0, e);
+    }
     commit(); D.draw(); D.onChange();
   }
   D.move = move;
+
+  /* ---------- 정렬 · 균등 분배 ---------- */
+  D.align = function (how) {
+    var list = D.selAll(); if (list.length < 2) return;
+    var bb = selBBox();
+    begin();
+    list.forEach(function (el) {
+      var b = elBBox(el);
+      if (how === 'left') el.x = r2(el.x + (bb.x - b.x));
+      else if (how === 'hcenter') el.x = r2(el.x + (bb.x + bb.w / 2 - (b.x + b.w / 2)));
+      else if (how === 'right') el.x = r2(el.x + (bb.x + bb.w - (b.x + b.w)));
+      else if (how === 'top') el.y = r2(el.y + (bb.y - b.y));
+      else if (how === 'vcenter') el.y = r2(el.y + (bb.y + bb.h / 2 - (b.y + b.h / 2)));
+      else if (how === 'bottom') el.y = r2(el.y + (bb.y + bb.h - (b.y + b.h)));
+    });
+    commit(); D.draw(); D.onChange();
+  };
+
+  /* 양 끝은 두고 사이 간격을 똑같이 */
+  D.distribute = function (axis) {
+    var list = D.selAll(); if (list.length < 3) return;
+    begin();
+    var items = list.map(function (el) { return { el: el, b: elBBox(el) }; });
+    items.sort(function (a, b) { return axis === 'x' ? a.b.x - b.b.x : a.b.y - b.b.y; });
+    var first = items[0].b, last = items[items.length - 1].b;
+    var span = axis === 'x' ? (last.x + last.w) - first.x : (last.y + last.h) - first.y;
+    var used = items.reduce(function (sum, i) { return sum + (axis === 'x' ? i.b.w : i.b.h); }, 0);
+    var gap = (span - used) / (items.length - 1);
+    var cur = axis === 'x' ? first.x : first.y;
+    items.forEach(function (it) {
+      if (axis === 'x') { it.el.x = r2(it.el.x + (cur - it.b.x)); cur += it.b.w + gap; }
+      else { it.el.y = r2(it.el.y + (cur - it.b.y)); cur += it.b.h + gap; }
+    });
+    commit(); D.draw(); D.onChange();
+  };
 
   /* ---------- 그리기 ---------- */
   D.draw = function () {
@@ -174,13 +258,10 @@ window.QL = window.QL || {};
     if (!cv) return;
     var row = S.rows.length ? S.rows[Math.min(S.sampleRow, S.rows.length - 1)] : null;
     cv.innerHTML = QL.labelHtml(S.elements, row, S.headers);
-    var e;
-    for (var i = 0; i < S.elements.length; i++) {
-      if (S.elements[i].id === S.selId) {
-        e = cv.querySelector('[data-id="' + S.elements[i].id + '"]');
-        if (e) e.classList.add('sel');
-      }
-    }
+    S.selIds.forEach(function (id) {
+      var e = cv.querySelector('[data-id="' + id + '"]');
+      if (e) e.classList.add('sel');
+    });
     drawHandles();
     drawLayers();
     drawProps();
@@ -190,6 +271,18 @@ window.QL = window.QL || {};
     var stage = $('#stage');
     var old = stage.querySelector('.hbox');
     if (old) old.remove();
+
+    var many = D.selAll();
+    if (many.length > 1) {                     // 여러 개 → 외곽 상자만
+      var bb = selBBox(), kk = MM2PX * S.scale;
+      var box2 = document.createElement('div');
+      box2.className = 'hbox';
+      box2.style.cssText = 'left:0;top:0;width:100%;height:100%';
+      box2.innerHTML = '<div class="selbox" style="left:' + (bb.x * kk) + 'px;top:' + (bb.y * kk) +
+        'px;width:' + (bb.w * kk) + 'px;height:' + (bb.h * kk) + 'px"></div>';
+      stage.appendChild(box2);
+      return;
+    }
     var el = D.sel();
     if (!el) return;
     var s = S.scale, k = MM2PX * s;
@@ -225,7 +318,7 @@ window.QL = window.QL || {};
     var h = '';
     for (var i = S.elements.length - 1; i >= 0; i--) {
       var e = S.elements[i];
-      h += '<li data-id="' + e.id + '" class="' + (e.id === S.selId ? 'on' : '') + '">' +
+      h += '<li data-id="' + e.id + '" class="' + (isSel(e.id) ? 'on' : '') + '">' +
         '<span class="ic">' + ICON[e.type] + '</span>' +
         '<span class="nm">' + esc(e.name || e.type) + '</span>' +
         '<button class="btn-s" data-mv="1" title="앞으로">▲</button>' +
@@ -247,7 +340,26 @@ window.QL = window.QL || {};
 
   function drawProps() {
     var box = $('#props'), el = D.sel();
-    if (!el) { box.innerHTML = '<p class="hint">요소를 선택하세요.</p>'; return; }
+    var many = D.selAll();
+
+    if (many.length > 1) {
+      var grp = function (label, kind, defs) {
+        return '<div class="f"><label>' + label + '</label><div class="align-grp">' +
+          defs.map(function (d) {
+            return '<button data-' + kind + '="' + d[0] + '" title="' + d[2] + '">' + d[1] + '</button>';
+          }).join('') + '</div></div>';
+      };
+      box.innerHTML = '<div class="prop-sec">' +
+        '<div class="ttl">요소 <b>' + many.length + '개</b> 선택됨</div>' +
+        grp('가로 정렬', 'align', [['left', '⇤', '왼쪽'], ['hcenter', '⇔', '가운데'], ['right', '⇥', '오른쪽']]) +
+        grp('세로 정렬', 'align', [['top', '⤒', '위'], ['vcenter', '⇕', '가운데'], ['bottom', '⤓', '아래']]) +
+        grp('균등 분배', 'dist', [['x', '↔', '가로 간격 균등 (3개 이상)'], ['y', '↕', '세로 간격 균등 (3개 이상)']]) +
+        '<p class="hint">Shift+클릭으로 선택에 더하거나 빼고, 빈 곳을 끌면 범위 선택입니다. ' +
+        'Ctrl+A 전체 선택. 끌어 옮기면 선택한 요소가 함께 움직입니다.</p></div>';
+      return;
+    }
+
+    if (!el) { box.innerHTML = '<p class="hint">요소를 선택하세요. (Shift+클릭 또는 빈 곳 드래그로 여러 개)</p>'; return; }
     var h = '';
 
     h += '<div class="prop-sec">' +
@@ -374,8 +486,10 @@ window.QL = window.QL || {};
     var cv = $('#canvas');
     var row = S.rows.length ? S.rows[Math.min(S.sampleRow, S.rows.length - 1)] : null;
     cv.innerHTML = QL.labelHtml(S.elements, row, S.headers);
-    var sel = cv.querySelector('[data-id="' + S.selId + '"]');
-    if (sel) sel.classList.add('sel');
+    S.selIds.forEach(function (id) {
+      var q = cv.querySelector('[data-id="' + id + '"]');
+      if (q) q.classList.add('sel');
+    });
     drawHandles();
     drawLayers();
   }
@@ -388,34 +502,105 @@ window.QL = window.QL || {};
   }
   function snap(v) { return S.snap ? Math.round(v * 2) / 2 : Math.round(v * 100) / 100; }
 
+  /* ---------- 스마트 정렬 가이드 ----------
+     옮기는 동안 라벨 가장자리/중앙과 다른 요소의 변·중심에 달라붙는다. */
+  function guideTargets(axis) {
+    var t = axis === 'x'
+      ? [{ v: 0 }, { v: S.label.w / 2 }, { v: S.label.w }]
+      : [{ v: 0 }, { v: S.label.h / 2 }, { v: S.label.h }];
+    S.elements.forEach(function (e) {
+      if (isSel(e.id)) return;
+      var b = elBBox(e);
+      if (axis === 'x') t.push({ v: b.x }, { v: b.x + b.w / 2 }, { v: b.x + b.w });
+      else t.push({ v: b.y }, { v: b.y + b.h / 2 }, { v: b.y + b.h });
+    });
+    return t;
+  }
+  /* 상자의 세 기준선(앞·중간·끝) 중 가장 가까운 목표를 찾아 보정량을 돌려준다 */
+  function bestSnap(lo, size, axis, thr) {
+    var mine = [lo, lo + size / 2, lo + size];
+    var best = null;
+    guideTargets(axis).forEach(function (t) {
+      mine.forEach(function (m) {
+        var d = t.v - m;
+        if (Math.abs(d) <= thr && (!best || Math.abs(d) < Math.abs(best.d))) best = { d: d, line: t.v };
+      });
+    });
+    return best;
+  }
+
+  function drawGuides(lines) {
+    var stage = $('#stage');
+    stage.querySelectorAll('.guideline').forEach(function (g) { g.remove(); });
+    if (!lines) return;
+    var k = MM2PX * S.scale;
+    var W = S.label.w * k, H = S.label.h * k;
+    if (lines.x != null) {
+      var gx = document.createElement('div');
+      gx.className = 'guideline';
+      gx.style.cssText = 'left:' + (lines.x * k) + 'px;top:0;width:1px;height:' + H + 'px';
+      stage.appendChild(gx);
+    }
+    if (lines.y != null) {
+      var gy = document.createElement('div');
+      gy.className = 'guideline';
+      gy.style.cssText = 'top:' + (lines.y * k) + 'px;left:0;height:1px;width:' + W + 'px';
+      stage.appendChild(gy);
+    }
+  }
+
+  function drawMarquee(a, b) {
+    var stage = $('#stage');
+    var m = stage.querySelector('.marquee');
+    if (!a) { if (m) m.remove(); return; }
+    if (!m) { m = document.createElement('div'); m.className = 'marquee'; stage.appendChild(m); }
+    var k = MM2PX * S.scale;
+    m.style.cssText = 'left:' + (Math.min(a.x, b.x) * k) + 'px;top:' + (Math.min(a.y, b.y) * k) +
+      'px;width:' + (Math.abs(b.x - a.x) * k) + 'px;height:' + (Math.abs(b.y - a.y) * k) + 'px';
+  }
+
   function bindCanvas() {
     var stage = $('#stage');
 
     stage.addEventListener('pointerdown', function (e) {
       var hn = e.target.closest('.handle');
       var elDiv = e.target.closest('.el');
-      if (!hn && !elDiv) { if (e.target.closest('#canvas')) { S.selId = null; D.draw(); } return; }
-
-      var el;
-      if (hn) { el = D.sel(); if (!el) return; }
-      else {
-        var id = elDiv.dataset.id;
-        if (id !== S.selId) { S.selId = id; D.draw(); }
-        el = D.sel();
-      }
-      if (!el) return;
-
+      var additive = e.shiftKey || e.ctrlKey || e.metaKey;
       var st = stageMM(e);
-      begin();                                   // 드래그 전 상태 포착
+
+      /* 빈 곳 → 영역 선택 시작 */
+      if (!hn && !elDiv) {
+        if (!e.target.closest('#canvas')) return;
+        if (!additive) { S.selIds = []; D.draw(); }
+        dragging = { mode: 'marquee', sx: st.x, sy: st.y, add: additive, base: S.selIds.slice() };
+        stage.setPointerCapture(e.pointerId);
+        e.preventDefault();
+        return;
+      }
+
+      if (hn) {
+        if (D.selAll().length !== 1) return;        // 크기·회전은 하나만 골랐을 때
+      } else {
+        var id = elDiv.dataset.id;
+        if (additive) { D.select(id, true); if (!isSel(id)) return; }
+        else if (!isSel(id)) D.select(id);
+      }
+      var list = D.selAll();
+      if (!list.length) return;
+
+      begin();                                      // 드래그 전 상태 포착
       dragging = {
         mode: hn ? (hn.dataset.h === 'rot' ? 'rot' : 'resize') : 'move',
         h: hn ? hn.dataset.h : null,
         sx: st.x, sy: st.y,
-        o: { x: el.x, y: el.y, w: el.w, h: el.h, rot: el.rot || 0 },
-        el: el
+        list: list,
+        orig: list.map(function (el) { return { x: el.x, y: el.y, w: el.w, h: el.h, rot: el.rot || 0 }; }),
+        bb: selBBox(),
+        el: list[0],
+        o: { x: list[0].x, y: list[0].y, w: list[0].w, h: list[0].h, rot: list[0].rot || 0 }
       };
       if (dragging.mode === 'rot') {
-        var ccx = el.x + el.w / 2, ccy = el.y + el.h / 2;
+        var ccx = dragging.o.x + dragging.o.w / 2, ccy = dragging.o.y + dragging.o.h / 2;
         dragging.a0 = Math.atan2(st.y - ccy, st.x - ccx) * 180 / Math.PI;
       }
       stage.setPointerCapture(e.pointerId);
@@ -424,21 +609,55 @@ window.QL = window.QL || {};
 
     stage.addEventListener('pointermove', function (e) {
       if (!dragging) return;
-      var st = stageMM(e), d = dragging, el = d.el;
+      var st = stageMM(e), d = dragging;
       var dx = st.x - d.sx, dy = st.y - d.sy;
 
+      if (d.mode === 'marquee') {
+        drawMarquee({ x: d.sx, y: d.sy }, st);
+        var x0 = Math.min(d.sx, st.x), x1 = Math.max(d.sx, st.x);
+        var y0 = Math.min(d.sy, st.y), y1 = Math.max(d.sy, st.y);
+        var hit = S.elements.filter(function (el) {
+          var b = elBBox(el);
+          return b.x < x1 && b.x + b.w > x0 && b.y < y1 && b.y + b.h > y0;
+        }).map(function (el) { return el.id; });
+        S.selIds = d.add ? d.base.concat(hit.filter(function (i) { return d.base.indexOf(i) < 0; })) : hit;
+        redrawCanvasOnly();
+        return;
+      }
+
+      var el = d.el;
+
       if (d.mode === 'move') {
-        el.x = snap(d.o.x + dx);
-        el.y = snap(d.o.y + dy);
+        var lines = null;
+        if (!e.altKey) {                            // Alt 누르면 가이드 끄기
+          var thr = 6 / (MM2PX * S.scale);          // 화면 6px 에 해당하는 mm
+          var gx = bestSnap(d.bb.x + dx, d.bb.w, 'x', thr);
+          var gy = bestSnap(d.bb.y + dy, d.bb.h, 'y', thr);
+          if (gx) dx += gx.d;
+          if (gy) dy += gy.d;
+          lines = { x: gx ? gx.line : null, y: gy ? gy.line : null };
+          if (!gx && !gy) lines = null;
+        }
+        if (!lines) {                               // 달라붙지 않을 때만 격자 보정
+          dx = snap(d.bb.x + dx) - d.bb.x;
+          dy = snap(d.bb.y + dy) - d.bb.y;
+        }
+        d.list.forEach(function (it, i) {
+          it.x = r2(d.orig[i].x + dx);
+          it.y = r2(d.orig[i].y + dy);
+        });
+        drawGuides(lines);
+
       } else if (d.mode === 'rot') {
-        var ccx = d.o.x + d.o.w / 2, ccy = d.o.y + d.o.h / 2;
-        var a = Math.atan2(st.y - ccy, st.x - ccx) * 180 / Math.PI;
+        var ccx2 = d.o.x + d.o.w / 2, ccy2 = d.o.y + d.o.h / 2;
+        var a = Math.atan2(st.y - ccy2, st.x - ccx2) * 180 / Math.PI;
         var nr = d.o.rot + (a - d.a0);
         if (e.shiftKey) nr = Math.round(nr / 15) * 15;
         el.rot = Math.round(nr * 10) / 10;
+
       } else {
         var rad = (d.o.rot || 0) * Math.PI / 180, co = Math.cos(rad), si = Math.sin(rad);
-        var lx = dx * co + dy * si;          // 회전 역변환
+        var lx = dx * co + dy * si;                 // 회전 역변환
         var ly = -dx * si + dy * co;
         var sx = /w/.test(d.h) ? -1 : (/e/.test(d.h) ? 1 : 0);
         var sy = /n/.test(d.h) ? -1 : (/s/.test(d.h) ? 1 : 0);
@@ -450,15 +669,19 @@ window.QL = window.QL || {};
         var mx = sx * (nw - d.o.w) / 2, my = sy * (nh - d.o.h) / 2;   // 로컬 중심 이동
         var cx2 = ocx + (mx * co - my * si), cy2 = ocy + (mx * si + my * co);
         el.w = nw; el.h = nh;
-        el.x = Math.round((cx2 - nw / 2) * 100) / 100;
-        el.y = Math.round((cy2 - nh / 2) * 100) / 100;
+        el.x = r2(cx2 - nw / 2);
+        el.y = r2(cy2 - nh / 2);
       }
       redrawCanvasOnly();
     });
 
     function endDrag(e) {
       if (!dragging) return;
+      var wasMarquee = dragging.mode === 'marquee';
       dragging = null;
+      drawGuides(null);
+      drawMarquee(null);
+      if (wasMarquee) { hist.pending = null; D.draw(); return; }
       commit();                                  // 드래그 한 번을 한 단계로
       drawProps();
       D.onChange();
@@ -478,15 +701,24 @@ window.QL = window.QL || {};
       }
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); D.redo(); return; }
 
-      var el = D.sel(); if (!el) return;
-      var step = e.shiftKey ? 1 : 0.2, used = true;
-      if (e.key === 'ArrowLeft') el.x = r2(el.x - step);
-      else if (e.key === 'ArrowRight') el.x = r2(el.x + step);
-      else if (e.key === 'ArrowUp') el.y = r2(el.y - step);
-      else if (e.key === 'ArrowDown') el.y = r2(el.y + step);
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'a') {
+        e.preventDefault();
+        S.selIds = S.elements.map(function (x) { return x.id; });
+        D.draw();
+        return;
+      }
+      if (e.key === 'Escape') { S.selIds = []; D.draw(); return; }
+
+      var list = D.selAll(); if (!list.length) return;
+      var step = e.shiftKey ? 1 : 0.2, used = true, dx = 0, dy = 0;
+      if (e.key === 'ArrowLeft') dx = -step;
+      else if (e.key === 'ArrowRight') dx = step;
+      else if (e.key === 'ArrowUp') dy = -step;
+      else if (e.key === 'ArrowDown') dy = step;
       else if (e.key === 'Delete' || e.key === 'Backspace') { D.remove(); e.preventDefault(); return; }
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { D.duplicate(); e.preventDefault(); return; }
       else used = false;
+      if (used) list.forEach(function (el) { el.x = r2(el.x + dx); el.y = r2(el.y + dy); });
       if (used) { touch(); e.preventDefault(); redrawCanvasOnly(); drawProps(); D.onChange(); }
     });
   }
@@ -496,6 +728,8 @@ window.QL = window.QL || {};
     $('#props').addEventListener('change', onPropInput);
     $('#props').addEventListener('click', function (e) {
       var b = e.target.closest('button'); if (!b) return;
+      if (b.dataset.align) { D.align(b.dataset.align); return; }
+      if (b.dataset.dist) { D.distribute(b.dataset.dist); return; }
       var el = D.sel(); if (!el) return;
       if (b.dataset.set) {
         begin();
@@ -523,10 +757,9 @@ window.QL = window.QL || {};
 
     $('#layers').addEventListener('click', function (e) {
       var li = e.target.closest('li[data-id]'); if (!li) return;
-      S.selId = li.dataset.id;
       var mv = e.target.closest('[data-mv]');
-      if (mv) move(parseInt(mv.dataset.mv, 10));
-      else D.draw();
+      if (mv) { if (!isSel(li.dataset.id)) S.selIds = [li.dataset.id]; move(parseInt(mv.dataset.mv, 10)); }
+      else D.select(li.dataset.id, e.shiftKey || e.ctrlKey || e.metaKey);
     });
   }
 

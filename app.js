@@ -13,7 +13,7 @@ window.QL = window.QL || {};
   /* ---------- 공유 상태 ---------- */
   var S = QL.state = {
     headers: [], rows: [], sampleRow: 0,
-    elements: [], selId: null,
+    elements: [], selIds: [],
     label: { w: 60, h: 40 },
     snap: true, scale: 1
   };
@@ -525,7 +525,7 @@ window.QL = window.QL || {};
         if (!d || !d.elements) throw new Error('형식이 아닙니다');
         if (d.set) applySettings(d.set);
         QL.D.mark(function () { S.elements = d.elements; });
-        S.selId = null;
+        S.selIds = [];
         togglePaperMode(); toggleMargin();
         changed();
       } catch (err) { alert('불러오기 실패: ' + err.message); }
