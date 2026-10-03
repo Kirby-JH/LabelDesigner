@@ -10,6 +10,68 @@ window.QL = window.QL || {};
   var S;                       // QL.state 참조
   var dragging = null;
 
+  /* ---------- 실행 취소 / 다시 실행 ----------
+     요소 배열 전체를 JSON 스냅샷으로 쌓는다. 라벨 하나에 들어가는 요소는
+     많아야 수십 개라 비용이 작고, 부분 되돌리기보다 동작이 예측 가능하다. */
+  var HIST_MAX = 60;
+  var hist = { past: [], future: [], pending: null, timer: null };
+
+  function snapshot() { return JSON.stringify(S.elements); }
+
+  /* 바꾸기 직전 상태를 붙잡아 둔다 (같은 편집 묶음에서는 한 번만) */
+  function begin() { if (hist.pending === null) hist.pending = snapshot(); }
+
+  /* 붙잡아 둔 상태를 실제로 기록 — 값이 안 바뀌었으면 버린다 */
+  function commit() {
+    clearTimeout(hist.timer);
+    if (hist.pending === null) return;
+    if (hist.pending !== snapshot()) {
+      hist.past.push(hist.pending);
+      if (hist.past.length > HIST_MAX) hist.past.shift();
+      hist.future.length = 0;
+    }
+    hist.pending = null;
+    refreshHistBtns();
+  }
+
+  /* 연속 입력(타이핑·방향키)은 멈춘 뒤 한 묶음으로 기록 */
+  function touch() {
+    begin();
+    clearTimeout(hist.timer);
+    hist.timer = setTimeout(commit, 600);
+  }
+
+  function apply(json) {
+    S.elements = JSON.parse(json);
+    if (!S.elements.some(function (e) { return e.id === S.selId; })) S.selId = null;
+    D.draw();
+    D.onChange();
+  }
+
+  D.undo = function () {
+    commit();
+    if (!hist.past.length) return;
+    hist.future.push(snapshot());
+    apply(hist.past.pop());
+    refreshHistBtns();
+  };
+  D.redo = function () {
+    commit();
+    if (!hist.future.length) return;
+    hist.past.push(snapshot());
+    apply(hist.future.pop());
+    refreshHistBtns();
+  };
+  /* 서식 불러오기처럼 바깥에서 통째로 바꿀 때 */
+  D.mark = function (fn) { begin(); fn(); commit(); };
+  D.resetHistory = function () { hist.past.length = 0; hist.future.length = 0; hist.pending = null; refreshHistBtns(); };
+
+  function refreshHistBtns() {
+    var u = document.querySelector('#btnUndo'), r = document.querySelector('#btnRedo');
+    if (u) u.disabled = !hist.past.length;
+    if (r) r.disabled = !hist.future.length;
+  }
+
   var $ = function (s, r) { return (r || document).querySelector(s); };
   var esc = function (s) { return QL.esc(s); };
   var r2 = function (v) { return Math.round(v * 100) / 100; };
@@ -62,10 +124,12 @@ window.QL = window.QL || {};
   };
 
   D.add = function (type, src) {
+    begin();
     var el = D.newEl(type, S.label);
     if (src) el.src = src;
     S.elements.push(el);
     S.selId = el.id;
+    commit();
     D.draw();
     D.onChange();
   };
@@ -79,25 +143,28 @@ window.QL = window.QL || {};
   D.remove = function () {
     var i = S.elements.findIndex(function (e) { return e.id === S.selId; });
     if (i < 0) return;
+    begin();
     S.elements.splice(i, 1);
     S.selId = S.elements.length ? S.elements[Math.min(i, S.elements.length - 1)].id : null;
-    D.draw(); D.onChange();
+    commit(); D.draw(); D.onChange();
   };
   D.duplicate = function () {
     var e = D.sel(); if (!e) return;
+    begin();
     var c = JSON.parse(JSON.stringify(e));
     SEQ++; c.id = 'e' + Date.now().toString(36) + SEQ;
     c.x = r2(Math.min(c.x + 2, S.label.w - 2)); c.y = r2(Math.min(c.y + 2, S.label.h - 2));
-    S.elements.push(c); S.selId = c.id; D.draw(); D.onChange();
+    S.elements.push(c); S.selId = c.id; commit(); D.draw(); D.onChange();
   };
   function move(dir) {
     var i = S.elements.findIndex(function (e) { return e.id === S.selId; });
     if (i < 0) return;
+    begin();
     var e = S.elements.splice(i, 1)[0];
     if (dir === 'front') S.elements.push(e);
     else if (dir === 'back') S.elements.unshift(e);
     else S.elements.splice(Math.max(0, Math.min(S.elements.length, i + dir)), 0, e);
-    D.draw(); D.onChange();
+    commit(); D.draw(); D.onChange();
   }
   D.move = move;
 
@@ -283,6 +350,7 @@ window.QL = window.QL || {};
   function onPropInput(e) {
     var el = D.sel(); if (!el) return;
     var t = e.target;
+    touch();
     if (t.id === 'p_nofill') {
       el.fill = t.checked ? 'none' : ($('[data-prop=fill]').value || '#ffffff');
       D.draw(); D.onChange(); return;
@@ -338,6 +406,7 @@ window.QL = window.QL || {};
       if (!el) return;
 
       var st = stageMM(e);
+      begin();                                   // 드래그 전 상태 포착
       dragging = {
         mode: hn ? (hn.dataset.h === 'rot' ? 'rot' : 'resize') : 'move',
         h: hn ? hn.dataset.h : null,
@@ -390,6 +459,7 @@ window.QL = window.QL || {};
     function endDrag(e) {
       if (!dragging) return;
       dragging = null;
+      commit();                                  // 드래그 한 번을 한 단계로
       drawProps();
       D.onChange();
     }
@@ -400,6 +470,14 @@ window.QL = window.QL || {};
     document.addEventListener('keydown', function (e) {
       var tag = (e.target.tagName || '').toLowerCase();
       if (tag === 'input' || tag === 'textarea' || tag === 'select') return;
+      // 실행 취소 / 다시 실행
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) D.redo(); else D.undo();
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); D.redo(); return; }
+
       var el = D.sel(); if (!el) return;
       var step = e.shiftKey ? 1 : 0.2, used = true;
       if (e.key === 'ArrowLeft') el.x = r2(el.x - step);
@@ -409,7 +487,7 @@ window.QL = window.QL || {};
       else if (e.key === 'Delete' || e.key === 'Backspace') { D.remove(); e.preventDefault(); return; }
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { D.duplicate(); e.preventDefault(); return; }
       else used = false;
-      if (used) { e.preventDefault(); redrawCanvasOnly(); drawProps(); D.onChange(); }
+      if (used) { touch(); e.preventDefault(); redrawCanvasOnly(); drawProps(); D.onChange(); }
     });
   }
 
@@ -420,9 +498,11 @@ window.QL = window.QL || {};
       var b = e.target.closest('button'); if (!b) return;
       var el = D.sel(); if (!el) return;
       if (b.dataset.set) {
+        begin();
         el[b.dataset.set] = b.dataset.val;
-        D.draw(); D.onChange(); return;
+        commit(); D.draw(); D.onChange(); return;
       }
+      begin();
       var act = b.dataset.act;
       if (act === 'cx') el.x = r2((S.label.w - el.w) / 2);
       else if (act === 'cy') el.y = r2((S.label.h - el.h) / 2);
@@ -435,10 +515,10 @@ window.QL = window.QL || {};
         el.tpl = ta.value.slice(0, p) + ins + ta.value.slice(ta.selectionEnd || p);
         D.draw();
         var ta2 = $('[data-prop=tpl]'); if (ta2) { ta2.focus(); ta2.setSelectionRange(p + ins.length, p + ins.length); }
-        D.onChange(); return;
-      } else if (act === 'imgre') { document.querySelector('#imgFile').click(); return; }
-      else return;
-      D.draw(); D.onChange();
+        commit(); D.onChange(); return;
+      } else if (act === 'imgre') { hist.pending = null; document.querySelector('#imgFile').click(); return; }
+      else { hist.pending = null; return; }
+      commit(); D.draw(); D.onChange();
     });
 
     $('#layers').addEventListener('click', function (e) {

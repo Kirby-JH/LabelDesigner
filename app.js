@@ -324,12 +324,28 @@ window.QL = window.QL || {};
     });
     return o;
   }
+  var saveWarned = false;
   function save() {
+    var payload;
     try {
-      localStorage.setItem(KEY, JSON.stringify({
+      payload = JSON.stringify({
         set: collect(), elements: S.elements, paste: $('#pasteArea').value.slice(0, 200000)
-      }));
-    } catch (e) { }
+      });
+    } catch (e) { return; }
+    try {
+      localStorage.setItem(KEY, payload);
+      saveWarned = false;
+    } catch (e) {
+      /* 대개 용량 초과 — 이미지 요소의 data URL 이 원인인 경우가 많다 */
+      if (saveWarned) return;
+      saveWarned = true;
+      var imgKB = 0;
+      S.elements.forEach(function (el) { if (el.type === 'image' && el.src) imgKB += el.src.length / 1024; });
+      toast('자동 저장 실패 — 브라우저 저장 공간을 넘었습니다 (' +
+        Math.round(payload.length / 1024) + 'KB' +
+        (imgKB > 200 ? ', 이미지 ' + Math.round(imgKB) + 'KB' : '') +
+        '). 지금 \u300c서식 저장\u300d으로 파일에 보관하세요.', 'bad');
+    }
   }
   function applySettings(o) {
     IDS.forEach(function (id) {
@@ -406,6 +422,42 @@ window.QL = window.QL || {};
     changed();
   }
 
+  /* ---------- 알림 ---------- */
+  var toastT = null;
+  function toast(msg, kind) {
+    var el = $('#toast');
+    el.textContent = msg;
+    el.className = 'toast' + (kind ? ' ' + kind : '');
+    el.hidden = false;
+    clearTimeout(toastT);
+    toastT = setTimeout(function () { el.hidden = true; }, kind === 'bad' ? 7000 : 3500);
+  }
+  QL.toast = toast;
+
+  /* ---------- 엑셀 파서 지연 로딩 ----------
+     SheetJS 는 gzip 308KB 로 전체의 대부분을 차지한다.
+     붙여넣기만 쓰는 경우엔 끝까지 받지 않도록 파일을 열 때만 가져온다. */
+  var xlsxState = 'idle';          // idle | loading | ready | failed
+  var xlsxWaiters = [];
+  function ensureXLSX(cb) {
+    if (xlsxState === 'ready' || typeof XLSX !== 'undefined') { xlsxState = 'ready'; cb(true); return; }
+    xlsxWaiters.push(cb);
+    if (xlsxState === 'loading') return;
+    xlsxState = 'loading';
+    toast('엑셀 파서를 불러오는 중…');
+    var sc = document.createElement('script');
+    sc.src = 'vendor/xlsx.full.min.js';
+    sc.onload = function () {
+      xlsxState = 'ready';
+      xlsxWaiters.splice(0).forEach(function (f) { f(true); });
+    };
+    sc.onerror = function () {
+      xlsxState = 'failed';
+      xlsxWaiters.splice(0).forEach(function (f) { f(false); });
+    };
+    document.head.appendChild(sc);
+  }
+
   /* ---------- 파일 ---------- */
   function readFile(file) {
     $('#fileName').textContent = file.name + ' 읽는 중…';
@@ -420,15 +472,28 @@ window.QL = window.QL || {};
           $('#fileName').textContent = file.name + ' · ' + S.rows.length + '행';
           return;
         }
-        workbook = XLSX.read(new Uint8Array(e.target.result), { type: 'array' });
-        var names = workbook.SheetNames;
-        $('#sheetWrap').hidden = names.length < 2;
-        $('#sheetSel').innerHTML = names.map(function (n) {
-          return '<option value="' + QL.esc(n) + '">' + QL.esc(n) + '</option>';
-        }).join('');
-        $('#sheetSel').value = names[0];
-        loadSheet();
-        $('#fileName').textContent = file.name + ' · 시트 ' + names.length + '개 · ' + S.rows.length + '행';
+        var buf = e.target.result;
+        ensureXLSX(function (ok) {
+          if (!ok) {
+            $('#fileName').textContent = '엑셀 파서를 불러오지 못했습니다. vendor/xlsx.full.min.js 를 확인하세요.';
+            toast('엑셀 파서를 불러오지 못했습니다. CSV 로 저장하거나 붙여넣기를 쓰세요.', 'bad');
+            return;
+          }
+          try {
+            workbook = XLSX.read(new Uint8Array(buf), { type: 'array' });
+            var names = workbook.SheetNames;
+            $('#sheetWrap').hidden = names.length < 2;
+            $('#sheetSel').innerHTML = names.map(function (n) {
+              return '<option value="' + QL.esc(n) + '">' + QL.esc(n) + '</option>';
+            }).join('');
+            $('#sheetSel').value = names[0];
+            loadSheet();
+            $('#fileName').textContent = file.name + ' · 시트 ' + names.length + '개 · ' + S.rows.length + '행';
+          } catch (err2) {
+            $('#fileName').textContent = '읽기 실패: ' + err2.message;
+            toast('엑셀 파일을 읽지 못했습니다: ' + err2.message, 'bad');
+          }
+        });
       } catch (err) {
         $('#fileName').textContent = '읽기 실패: ' + err.message;
       }
@@ -459,7 +524,7 @@ window.QL = window.QL || {};
         var d = JSON.parse(e.target.result);
         if (!d || !d.elements) throw new Error('형식이 아닙니다');
         if (d.set) applySettings(d.set);
-        S.elements = d.elements;
+        QL.D.mark(function () { S.elements = d.elements; });
         S.selId = null;
         togglePaperMode(); toggleMargin();
         changed();
@@ -523,7 +588,9 @@ window.QL = window.QL || {};
       if (b.dataset.add) {
         if (b.dataset.add === 'image') { $('#imgFile').click(); return; }
         QL.D.add(b.dataset.add);
-      } else if (b.id === 'btnDup') QL.D.duplicate();
+      } else if (b.id === 'btnUndo') QL.D.undo();
+      else if (b.id === 'btnRedo') QL.D.redo();
+      else if (b.id === 'btnDup') QL.D.duplicate();
       else if (b.id === 'btnDel') QL.D.remove();
       else if (b.id === 'btnFront') QL.D.move('front');
       else if (b.id === 'btnBack') QL.D.move('back');
@@ -533,12 +600,32 @@ window.QL = window.QL || {};
       var fr = new FileReader();
       fr.onload = function (ev) {
         var sel = QL.D.sel();
-        if (sel && sel.type === 'image') { sel.src = ev.target.result; QL.D.draw(); changed(); }
-        else QL.D.add('image', ev.target.result);
+        if (sel && sel.type === 'image') {
+          QL.D.mark(function () { sel.src = ev.target.result; });
+          QL.D.draw(); changed();
+        } else QL.D.add('image', ev.target.result);
       };
       fr.readAsDataURL(f);
       e.target.value = '';
     });
+    // 좁은 화면: 사이드 패널을 서랍처럼 열고 닫는다
+    function pane(side, on) {
+      var el = $('.side.' + side);
+      if (on === undefined) on = !el.classList.contains('open');
+      $$('.side').forEach(function (p) { p.classList.remove('open'); });
+      if (on) el.classList.add('open');
+      $('#scrim').hidden = !on;
+    }
+    $('#tglLeft').addEventListener('click', function () { pane('left'); });
+    $('#tglRight').addEventListener('click', function () { pane('right'); });
+    $('#scrim').addEventListener('click', function () { pane('left', false); });
+    window.addEventListener('resize', function () {
+      if (window.innerWidth > 1000) {
+        $$('.side').forEach(function (p) { p.classList.remove('open'); });
+        $('#scrim').hidden = true;
+      }
+    });
+
     $('#snap').addEventListener('change', function () { S.snap = this.checked; save(); });
     $('#zoom').addEventListener('change', applyZoom);
     window.addEventListener('resize', function () { if ($('#zoom').value === 'fit') applyZoom(); });
@@ -604,6 +691,7 @@ window.QL = window.QL || {};
     else setTable([]);
     setView('design');
     changed();
+    QL.D.resetHistory();
   }
 
   if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

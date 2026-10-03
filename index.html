@@ -11,6 +11,7 @@
 
 <!-- ================= 상단 바 ================= -->
 <header class="top">
+  <button class="paneltgl" id="tglLeft" type="button" title="데이터·용지 패널">☰</button>
   <div class="brand">라벨 디자이너<em>롤 · 시트 라벨 QR/바코드 출력</em></div>
   <div class="segs" id="viewTabs">
     <button data-view="design" class="on" type="button">디자인</button>
@@ -21,6 +22,7 @@
   <button id="btnTplSave" type="button" title="현재 디자인을 .json 파일로 저장">서식 저장</button>
   <button id="btnTplLoad" type="button" title="저장한 .json 서식 불러오기">서식 불러오기</button>
   <input type="file" id="tplFile" accept=".json" hidden>
+  <button class="paneltgl" id="tglRight" type="button" title="속성 패널">▦</button>
   <button class="primary" id="btnPrint" type="button">🖨 인쇄 / PDF</button>
 </header>
 
@@ -136,6 +138,9 @@
       <button data-add="image" type="button">🖼 이미지</button>
       <input type="file" id="imgFile" accept="image/*" hidden>
       <span class="sep"></span>
+      <button id="btnUndo" type="button" title="실행 취소 (Ctrl+Z)" disabled>↶ 취소</button>
+      <button id="btnRedo" type="button" title="다시 실행 (Ctrl+Shift+Z)" disabled>↷ 다시</button>
+      <span class="sep"></span>
       <button id="btnDup" type="button" title="Ctrl+D">복제</button>
       <button id="btnDel" type="button" title="Delete">삭제</button>
       <span class="sep"></span>
@@ -177,9 +182,12 @@
   </aside>
 </div>
 
+<div class="scrim" id="scrim" hidden></div>
+<div class="toast" id="toast" hidden></div>
+
 <script src="vendor/qrcode.min.js"></script>
 <script src="vendor/jsbarcode.min.js"></script>
-<script src="vendor/xlsx.full.min.js"></script>
+<!-- vendor/xlsx.full.min.js 는 엑셀 파일을 열 때만 app.js 가 불러온다 (초기 로딩 308KB 절감) -->
 <script src="render.js"></script>
 <script src="designer.js"></script>
 <script src="app.js"></script>
