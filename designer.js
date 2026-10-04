@@ -355,6 +355,7 @@ window.QL = window.QL || {};
       '<input type="number" data-prop="' + prop + '" step="' + QL.U.step() + '"' +
       (min != null ? ' min="' + QL.U.to(min) + '"' : '') + '></div>';
   }
+  var RAW = '\u0001';                      // 값 앞에 붙으면 {} 로 감싸지 않고 그대로 넣는다
   function colOptions() {
     var cols = S.headers.map(function (h) {
       return '<option value="' + esc(h) + '">' + esc(h) + '</option>';
@@ -362,8 +363,12 @@ window.QL = window.QL || {};
     var bi = QL.BUILTINS.map(function (b) {
       return '<option value="' + esc(b.v) + '">' + esc(b.n) + '</option>';
     }).join('');
+    var sn = QL.SNIPPETS.map(function (b) {
+      return '<option value="' + esc(RAW + b.raw) + '">' + esc(b.n) + '</option>';
+    }).join('');
     return (cols ? '<optgroup label="데이터 열">' + cols + '</optgroup>' : '') +
-      '<optgroup label="내장 변수">' + bi + '</optgroup>';
+      '<optgroup label="내장 변수">' + bi + '</optgroup>' +
+      '<optgroup label="가공 · 조건">' + sn + '</optgroup>';
   }
 
   function drawProps() {
@@ -410,8 +415,11 @@ window.QL = window.QL || {};
         '<div class="f"><textarea data-prop="tpl" placeholder="' +
         (el.type === 'image' ? '예: img/{품번}.png' : '') +
         '" style="min-height:' + (el.type === 'text' ? 54 : 32) + 'px;font-size:11.5px"></textarea></div>' +
-        '<div class="tpl-row"><select id="insCol"><option value="">열 넣기…</option>' + colOptions() + '</select>' +
-        '<button class="btn-s" data-act="ins">삽입</button></div></div>';
+        '<div class="tpl-row"><select id="insCol"><option value="">열 · 변수 넣기…</option>' + colOptions() + '</select>' +
+        '<button class="btn-s" data-act="ins">삽입</button></div>' +
+        '<p class="hint">가공은 <code>{입고일|날짜}</code>처럼 <code>|</code> 뒤에 붙입니다 ' +
+        '(날짜·시간·천단위·앞·뒤·자르기·치환·채움·소수·곱하기·ean13 …).<br>' +
+        '조건은 <code>{?수량&gt;100}대량{:}소량{/}</code> 형태이고 거짓 쪽은 생략할 수 있습니다.</p></div>';
     }
 
     if (el.type === 'text') {
@@ -782,7 +790,7 @@ window.QL = window.QL || {};
         var sel = $('#insCol'); if (!sel || !sel.value) return;
         var ta = $('[data-prop=tpl]');
         var p = ta.selectionStart == null ? ta.value.length : ta.selectionStart;
-        var ins = '{' + sel.value + '}';
+        var ins = sel.value.charAt(0) === RAW ? sel.value.slice(1) : '{' + sel.value + '}';
         el.tpl = ta.value.slice(0, p) + ins + ta.value.slice(ta.selectionEnd || p);
         D.draw();
         var ta2 = $('[data-prop=tpl]'); if (ta2) { ta2.focus(); ta2.setSelectionRange(p + ins.length, p + ins.length); }

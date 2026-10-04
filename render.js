@@ -85,6 +85,65 @@ window.QL = window.QL || {};
     };
     return String(pat).replace(/YYYY|YY|MM|DD|HH|mm|ss/g, function (t) { return map[t]; });
   }
+  /* ---------- 날짜·시간 읽기 ----------
+     엑셀에서 넘어오는 값은 형식이 제각각이라(25.10.04 14.30.00 / 2025-10-04 /
+     20251004 / 엑셀 일련번호 …) 정규식으로 날짜 부분을 먼저 집고,
+     그 뒤쪽에서만 시간을 찾는다. 그래야 25.10.04 의 10.04 를 시간으로 오해하지 않는다. */
+  function normYear(y) {
+    y = parseInt(y, 10);
+    if (y < 70) return 2000 + y;
+    if (y < 100) return 1900 + y;
+    return y;
+  }
+  QL.parseDT = function (v) {
+    if (v == null) return null;
+    var str = String(v).trim();
+    if (str === '') return null;
+
+    /* 엑셀 일련번호 (1899-12-30 기준). 소수부는 하루 중 시각. */
+    if (/^\d{1,6}(\.\d+)?$/.test(str) && parseFloat(str) > 20 && parseFloat(str) < 80000) {
+      var n = parseFloat(str);
+      var ms = Math.round((n - 25569) * 86400) * 1000;        // 1970-01-01 기준, 초 단위로 반올림
+      var d0 = new Date(ms);
+      if (!isNaN(d0.getTime())) {
+        return { y: d0.getUTCFullYear(), m: d0.getUTCMonth() + 1, d: d0.getUTCDate(),
+          H: d0.getUTCHours(), M: d0.getUTCMinutes(), S: d0.getUTCSeconds(), hasDate: true,
+          hasTime: n % 1 !== 0 };
+      }
+    }
+
+    var out = { y: 0, m: 0, d: 0, H: 0, M: 0, S: 0, hasDate: false, hasTime: false };
+    var rest = str;
+
+    var md = str.match(/(\d{4}|\d{2})\s*[.\-\/년]\s*(\d{1,2})\s*[.\-\/월]\s*(\d{1,2})\s*일?/);
+    if (md && (+md[2] < 1 || +md[2] > 12 || +md[3] < 1 || +md[3] > 31)) md = null;  // 14.30.00 같은 시각을 날짜로 오해하지 않게
+    if (md) {
+      out.y = normYear(md[1]); out.m = +md[2]; out.d = +md[3]; out.hasDate = true;
+      rest = str.slice(md.index + md[0].length);
+    } else {
+      var m8 = str.match(/(^|\D)(\d{4})(\d{2})(\d{2})(\D|$)/);
+      if (m8) {
+        out.y = +m8[2]; out.m = +m8[3]; out.d = +m8[4]; out.hasDate = true;
+        rest = str.slice(m8.index + m8[0].length);
+      }
+    }
+
+    var mt = rest.match(/(\d{1,2})\s*[:.\-시]\s*(\d{1,2})(?:\s*[:.\-분]\s*(\d{1,2}))?\s*초?/);
+    if (mt && +mt[1] < 24 && +mt[2] < 60) {
+      out.H = +mt[1]; out.M = +mt[2]; out.S = mt[3] ? +mt[3] : 0; out.hasTime = true;
+    }
+    return (out.hasDate || out.hasTime) ? out : null;
+  };
+
+  function fmtParts(p, pat) {
+    var map = {
+      YYYY: String(p.y), YY: String(p.y).slice(2),
+      MM: pad2(p.m), DD: pad2(p.d), M: String(p.m), D: String(p.d),
+      HH: pad2(p.H), mm: pad2(p.M), ss: pad2(p.S), H: String(p.H)
+    };
+    return String(pat).replace(/YYYY|YY|MM|DD|HH|mm|ss|M|D|H/g, function (t) { return map[t]; });
+  }
+
   /* EAN/UPC 체크디지트 — 오른쪽부터 3,1,3,1… 가중합 */
   QL.eanCheck = function (digits) {
     var sum = 0, n = digits.length;
@@ -92,9 +151,135 @@ window.QL = window.QL || {};
     return String((10 - sum % 10) % 10);
   };
 
+  /* ---------- 값 가공 필터 ---------- */
+  function applyFilter(val, f) {
+    var ci = f.indexOf(':');
+    var name = (ci >= 0 ? f.slice(0, ci) : f).trim();
+    var arg = ci >= 0 ? f.slice(ci + 1) : null;
+    var n;
+
+    switch (name) {
+      case '날짜': case 'date': {
+        var p = QL.parseDT(val);
+        return p && p.hasDate ? fmtParts(p, arg || 'YYYY-MM-DD') : '';
+      }
+      case '시간': case 'time': {
+        var q = QL.parseDT(val);
+        return q && q.hasTime ? fmtParts(q, arg || 'HH:mm') : '';
+      }
+      case '숫자': return val.replace(/\D/g, '');
+      case '대문자': return val.toUpperCase();
+      case '소문자': return val.toLowerCase();
+      case '공백제거': return val.replace(/\s+/g, '');
+      case '다듬기': return val.trim().replace(/\s+/g, ' ');
+      case 'ean13': case 'ean': case '체크디지트': {
+        var d = val.replace(/\D/g, '');
+        return d + QL.eanCheck(d);
+      }
+      case '앞': return val.slice(0, Math.max(0, parseInt(arg, 10) || 0));
+      case '뒤': return arg ? val.slice(-Math.abs(parseInt(arg, 10) || 0)) : val;
+      case '자르기': {                                  // 자르기:3,5 → 3번째부터 5글자
+        var a = String(arg || '').split(',');
+        var from = Math.max(1, parseInt(a[0], 10) || 1) - 1;
+        var len = a[1] != null ? parseInt(a[1], 10) : undefined;
+        return len == null ? val.slice(from) : val.substr(from, len);
+      }
+      case '치환': {                                    // 치환:찾을말>바꿀말
+        var pr = String(arg || '').split('>');
+        if (pr.length < 2) return val;
+        return val.split(pr[0]).join(pr.slice(1).join('>'));
+      }
+      case '채움': {                                    // 채움:0001 → 자릿수만큼 0 채우기
+        var w = String(arg || '').length;
+        var t = val;
+        while (t.length < w) t = (String(arg || '0')[0] || '0') + t;
+        return t;
+      }
+      case '천단위': {
+        n = parseFloat(val.replace(/[^0-9.\-]/g, ''));
+        return isFinite(n) ? n.toLocaleString('ko-KR') : val;
+      }
+      case '소수': {
+        n = parseFloat(val.replace(/[^0-9.\-]/g, ''));
+        return isFinite(n) ? n.toFixed(Math.max(0, parseInt(arg, 10) || 0)) : val;
+      }
+      case '더하기': case '빼기': case '곱하기': case '나누기': {
+        n = parseFloat(val.replace(/[^0-9.\-]/g, ''));
+        var k = parseFloat(arg);
+        if (!isFinite(n) || !isFinite(k)) return val;
+        if (name === '더하기') n += k;
+        else if (name === '빼기') n -= k;
+        else if (name === '곱하기') n *= k;
+        else n = k ? n / k : n;
+        return String(Math.round(n * 1e6) / 1e6);
+      }
+      default: return val;
+    }
+  }
+
+  /* ---------- 조건 분기 ----------
+     {?재고<10}재고 부족{:}정상{/}   — {:} 이하(거짓 쪽)는 생략 가능
+     {?비고}비고: {비고}{/}          — 연산자가 없으면 "값이 있으면 참"
+     안쪽 블록부터 처리하므로 중첩해 쓸 수 있다. */
+  /* allowIndex: 왼쪽 피연산자에서만 {3} 같은 열 번호를 허용한다.
+     오른쪽의 숫자는 비교할 값이지 열 번호가 아니다 (수량>100 의 100). */
+  function cellOf(name, row, headers, allowIndex) {
+    name = String(name).trim();
+    var i = headers ? headers.indexOf(name) : -1;
+    if (i < 0 && allowIndex && /^\d+$/.test(name)) {
+      var k = parseInt(name, 10) - 1;
+      if (headers && k >= 0 && k < headers.length) i = k;
+    }
+    if (i >= 0) return { isCol: true, v: row ? String(row[i] == null ? '' : row[i]) : '' };
+    return { isCol: false, v: name.replace(/^['"]|['"]$/g, '') };
+  }
+
+  function testCond(expr, row, headers) {
+    expr = String(expr).trim();
+    var m = expr.match(/^([\s\S]*?)\s*(>=|<=|!=|<>|=|>|<|포함|시작|끝)\s*([\s\S]*)$/);
+    if (!m) return cellOf(expr, row, headers, true).v.trim() !== '';
+
+    var L = cellOf(m[1], row, headers, true).v;
+    var op = m[2];
+    var R = cellOf(m[3], row, headers, false);
+    var rv = R.isCol ? R.v : R.v;
+
+    if (op === '포함') return L.indexOf(rv) >= 0;
+    if (op === '시작') return L.lastIndexOf(rv, 0) === 0;
+    if (op === '끝') return rv === '' || L.slice(-rv.length) === rv;
+
+    var ln = parseFloat(String(L).replace(/[,\s]/g, ''));
+    var rn = parseFloat(String(rv).replace(/[,\s]/g, ''));
+    var num = isFinite(ln) && isFinite(rn) &&
+      /^[-\d.,\s]+$/.test(String(L).trim()) && /^[-\d.,\s]+$/.test(String(rv).trim());
+    var a = num ? ln : L.trim(), b = num ? rn : String(rv).trim();
+
+    switch (op) {
+      case '=': return a === b;
+      case '!=': case '<>': return a !== b;
+      case '>': return a > b;
+      case '<': return a < b;
+      case '>=': return a >= b;
+      case '<=': return a <= b;
+    }
+    return false;
+  }
+
+  var COND_RE = /\{\?([^{}]*)\}((?:(?!\{\?)(?!\{\/\})[\s\S])*?)(?:\{:\}((?:(?!\{\?)(?!\{\/\})[\s\S])*?))?\{\/\}/;
+  function resolveConds(tpl, row, headers) {
+    var guard = 0;
+    while (COND_RE.test(tpl) && guard++ < 40) {
+      tpl = tpl.replace(COND_RE, function (m, cond, yes, no) {
+        return testCond(cond, row, headers) ? yes : (no || '');
+      });
+    }
+    return tpl;
+  }
+
   QL.resolve = function (tpl, row, headers, ctx) {
     if (tpl == null) return '';
-    return String(tpl).replace(/\{([^{}]*)\}/g, function (m, body) {
+    var src = resolveConds(String(tpl), row, headers);
+    return src.replace(/\{([^{}]*)\}/g, function (m, body) {
       body = body.trim();
       if (body === '') return m;
 
@@ -129,15 +314,7 @@ window.QL = window.QL || {};
         val = String(row[i] == null ? '' : row[i]);
       }
 
-      filters.forEach(function (f) {
-        if (f === '숫자') val = val.replace(/\D/g, '');
-        else if (f === '대문자') val = val.toUpperCase();
-        else if (f === '소문자') val = val.toLowerCase();
-        else if (f === 'ean13' || f === 'ean' || f === '체크디지트') {
-          var d = val.replace(/\D/g, '');
-          val = d + QL.eanCheck(d);
-        }
-      });
+      filters.forEach(function (f) { val = applyFilter(val, f); });
       return val;
     });
   };
@@ -147,9 +324,22 @@ window.QL = window.QL || {};
     { v: '일련번호', n: '일련번호 1,2,3…' },
     { v: '일련번호:0001', n: '일련번호 0001…' },
     { v: '행번호', n: '데이터 행 번호' },
-    { v: '오늘', n: '오늘 날짜 2026-10-03' },
-    { v: '오늘:YY.MM.DD', n: '오늘 날짜 26.10.03' },
-    { v: '시간', n: '현재 시각 14:05' }
+    { v: '오늘', n: '오늘 날짜' },
+    { v: '오늘:YY.MM.DD', n: '오늘 날짜 (YY.MM.DD)' },
+    { v: '시간', n: '현재 시각' }
+  ];
+  /* 드롭다운에 같이 넣는 보기들 — raw 가 있으면 그대로 삽입한다 */
+  QL.SNIPPETS = [
+    { raw: '|날짜', n: '◂ 앞의 열에서 날짜만' },
+    { raw: '|날짜:YY.MM.DD', n: '◂ 날짜 (YY.MM.DD)' },
+    { raw: '|시간', n: '◂ 앞의 열에서 시간만' },
+    { raw: '|시간:HH:mm:ss', n: '◂ 시간 (초까지)' },
+    { raw: '|천단위', n: '◂ 1,234,567 로' },
+    { raw: '|앞:4', n: '◂ 앞 4글자' },
+    { raw: '|치환:A>B', n: '◂ A 를 B 로' },
+    { raw: '|ean13', n: '◂ 체크디지트 붙이기' },
+    { raw: '{?열이름>10}많음{:}적음{/}', n: '조건 분기' },
+    { raw: '{?비고}({비고}){/}', n: '값이 있을 때만' }
   ];
 
   /* ---------- QR ---------- */
