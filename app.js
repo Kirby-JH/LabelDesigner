@@ -144,8 +144,7 @@ window.QL = window.QL || {};
     }
     if (S.sampleRow >= S.rows.length) S.sampleRow = 0;
     fillQtySelect();
-    fillSampleSelect();
-    changed();
+    changed();                                   // updateStat 에서 범위에 맞춰 다시 채운다
   }
 
   function fillQtySelect() {
@@ -160,16 +159,39 @@ window.QL = window.QL || {};
     });
     sel.value = pick === null ? '-1' : pick;
   }
-  function fillSampleSelect() {
+  /* 미리볼 행 목록도 출력 범위를 따라간다 */
+  function fillSampleSelect(win) {
     var sel = $('#sampleRow');
-    if (!S.rows.length) { sel.innerHTML = '<option value="0">(데이터 없음)</option>'; return; }
-    var max = Math.min(S.rows.length, 300), h = '', i;
-    for (i = 0; i < max; i++) {
+    if (!S.rows.length) { sel.innerHTML = '<option value="0">(데이터 없음)</option>'; S.sampleRow = 0; return; }
+    var from = Math.max(1, win && win.from ? win.from : 1);
+    var to = Math.min(S.rows.length, win && win.to ? win.to : S.rows.length);
+    if (to < from) to = from;
+    var last = Math.min(to, from + SAMPLE_MAX - 1);
+    if (S.sampleRow < from - 1 || S.sampleRow > last - 1) S.sampleRow = from - 1;
+
+    var h = '', i;
+    for (i = from - 1; i < last; i++) {
       h += '<option value="' + i + '">' + (i + 1) + '행 · ' +
         QL.esc(S.rows[i].slice(0, 3).join(' / ').slice(0, 30)) + '</option>';
     }
+    if (last < to) h += '<option value="' + (last - 1) + '" disabled>… ' +
+      (to - last).toLocaleString() + '행 더 있음 (범위를 옮겨 보세요)</option>';
     sel.innerHTML = h;
-    sel.value = String(Math.min(S.sampleRow, max - 1));
+    sel.value = String(S.sampleRow);
+  }
+
+  function drawWarn(v) {
+    var el = $('#dataWarn');
+    if (!S.rows.length || !v) { el.hidden = true; return; }
+    var rows = Object.keys(v.prob).map(function (i) { return +i + 1; });
+    if (!rows.length) { el.hidden = true; return; }
+    var head = rows.slice(0, 8).join(', ') + (rows.length > 8 ? ' 외 ' + (rows.length - 8) + '행' : '');
+    el.hidden = false;
+    el.innerHTML = '바코드 형식 오류 <b>' + rows.length.toLocaleString() + '행</b> — ' + head +
+      '<br><span style="opacity:.8">' + QL.esc(v.prob[rows[0] - 1][0]) + '</span>' +
+      (v.truncated ? '<br><span style="opacity:.8">※ ' + v.from.toLocaleString() + '~' +
+        v.to.toLocaleString() + '행까지만 검사했습니다 (한 번에 ' +
+        VALIDATE_MAX.toLocaleString() + '행)</span>' : '');
   }
 
   /* ---------- 인쇄 항목 ----------
@@ -241,18 +263,26 @@ window.QL = window.QL || {};
   }
 
   /* ---------- 데이터 검증 · 표 ---------- */
-  var VALIDATE_MAX = 500, TABLE_MAX = 200;
+  var VALIDATE_MAX = 2000, TABLE_MAX = 200, SAMPLE_MAX = 300;
 
-  /* 바코드 요소에 들어갈 값이 그 규격에 맞는지 행마다 검사 */
-  function validateRows() {
-    var out = { prob: {}, dupe: {}, count: 0 };
+  /* 바코드 요소에 들어갈 값이 그 규격에 맞는지 검사한다.
+     앞에서부터 고정된 만큼이 아니라 "지금 출력할 범위"를 본다.
+     20,000행 중 15,000~15,500행만 뽑는데 1~500행만 검사하면 의미가 없다. */
+  function validateRows(win) {
+    var out = { prob: {}, dupe: {}, count: 0, from: 1, to: 0, truncated: false };
     if (!S.rows.length) return out;
+
+    var from = Math.max(1, win && win.from ? win.from : 1);
+    var to = Math.min(S.rows.length, win && win.to ? win.to : S.rows.length);
+    if (to < from) to = from;
+    var lim = Math.min(to, from + VALIDATE_MAX - 1);
+    out.from = from; out.to = lim; out.truncated = lim < to;
 
     var bcs = S.elements.filter(function (e) { return e.type === 'barcode' && e.tpl; });
     var seen = {};
-    var lim = Math.min(S.rows.length, VALIDATE_MAX);
-    for (var i = 0; i < lim; i++) {
+    for (var i = from - 1; i < lim; i++) {
       var row = S.rows[i];
+      if (!row) continue;
       var joined = row.join('\u0001');
       if (seen[joined]) out.dupe[i] = 1; else seen[joined] = 1;
 
@@ -263,24 +293,21 @@ window.QL = window.QL || {};
         if (!v) msg = (el.name || '바코드') + ' 값이 비어 있음';
         else if (!QL.barcodeValid(v, el.fmt || 'CODE128'))
           msg = (el.name || '바코드') + ' — ' + (el.fmt || 'CODE128') + ' 형식에 맞지 않음: ' + v;
-        if (msg) {
-          (out.prob[i] = out.prob[i] || []).push(msg);
-          out.count++;
-        }
+        if (msg) { (out.prob[i] = out.prob[i] || []).push(msg); out.count++; }
       }
     }
     return out;
   }
 
-  function drawTable(v) {
+  function drawTable(v, win) {
     var wrap = $('#dataTable');
     if (wrap.hidden) return;
     if (!S.rows.length) { wrap.innerHTML = '<p class="hint" style="padding:8px">데이터가 없습니다.</p>'; return; }
-    v = v || validateRows();
-    var max = Math.min(S.rows.length, TABLE_MAX);
+    v = v || validateRows(win);
+    var from = v.from, to = Math.min(v.to, from + TABLE_MAX - 1);
     var h = '<table class="dt"><thead><tr><th>#</th>' +
       S.headers.map(function (x) { return '<th>' + QL.esc(x) + '</th>'; }).join('') + '</tr></thead><tbody>';
-    for (var i = 0; i < max; i++) {
+    for (var i = from - 1; i < to; i++) {
       var cls = (v.prob[i] ? 'bad ' : '') + (v.dupe[i] ? 'dupe ' : '') + (i === S.sampleRow ? 'cur' : '');
       h += '<tr data-row="' + i + '" class="' + cls.trim() + '"' +
         (v.prob[i] ? ' title="' + QL.esc(v.prob[i].join('\n')) + '"' : '') + '>' +
@@ -288,21 +315,13 @@ window.QL = window.QL || {};
         S.rows[i].map(function (c) { return '<td>' + QL.esc(c) + '</td>'; }).join('') + '</tr>';
     }
     h += '</tbody></table>';
-    if (S.rows.length > max) h += '<p class="hint" style="padding:6px">' + max + '행까지 표시 (전체 ' + S.rows.length + '행)</p>';
+    if (to < v.to || from > 1) {
+      h += '<p class="hint" style="padding:6px">' + from.toLocaleString() + '~' + to.toLocaleString() +
+        '행 표시 · 출력 범위를 옮기면 그 구간이 보입니다 (전체 ' + S.rows.length.toLocaleString() + '행)</p>';
+    }
     wrap.innerHTML = h;
   }
 
-  function drawWarn(v) {
-    var el = $('#dataWarn');
-    if (!S.rows.length) { el.hidden = true; return; }
-    v = v || validateRows();
-    var rows = Object.keys(v.prob).map(function (i) { return +i + 1; });
-    if (!rows.length) { el.hidden = true; return; }
-    var head = rows.slice(0, 8).join(', ') + (rows.length > 8 ? ' 외 ' + (rows.length - 8) + '행' : '');
-    el.hidden = false;
-    el.innerHTML = '바코드 형식 오류 <b>' + rows.length + '행</b> — ' + head +
-      '<br><span style="opacity:.8">' + QL.esc(v.prob[rows[0] - 1][0]) + '</span>';
-  }
 
   /* ---------- 용지 ---------- */
   /* 길이 입력칸은 모두 mm 로 환산해 읽는다 */
@@ -374,10 +393,15 @@ window.QL = window.QL || {};
   QL.changed = changed;
 
   function updateStat() {
-    var v = S.rows.length ? validateRows() : null;   // 한 번만 검사해 두 곳에서 쓴다
-    drawWarn(v);
-    drawTable(v);
     var c = collectItems(), o = paperOpts();
+    /* 출력할 구간을 먼저 알아내고, 검증·표·미리볼 행을 모두 거기에 맞춘다 */
+    var win = S.rows.length
+      ? { from: c.rowFrom || 1, to: c.rowTo || S.rows.length }
+      : null;
+    var v = win ? validateRows(win) : null;
+    drawWarn(v);
+    drawTable(v, win);
+    fillSampleSelect(win);
     var n = c.items.length;
     var pages = o.mode === 'roll' ? n
       : Math.ceil((n + (o.startAt % (o.cols * o.rows))) / (o.cols * o.rows));
@@ -454,7 +478,28 @@ window.QL = window.QL || {};
     previewDirty = false;
     applyZoom();
   }
-  function ensurePreview() { if (previewDirty) buildPreview(); }
+  function busy(msg) {
+    var el = $('#busy');
+    if (!msg) { el.hidden = true; return; }
+    el.firstElementChild.textContent = msg;
+    el.hidden = false;
+  }
+
+  /* 인쇄 직전처럼 기다릴 수 없는 자리에서 쓰는 즉시 생성 */
+  function ensurePreviewSync() { if (previewDirty) buildPreview(); }
+
+  /* 화면에서 쓰는 생성 — 장수가 많으면 "만드는 중"을 먼저 그려 준다.
+     5,000장이면 QR 생성만 2.5초라 아무 표시가 없으면 멈춘 줄 안다. */
+  function ensurePreview(cb) {
+    if (!previewDirty) { if (cb) cb(); return; }
+    var n = collectItems().items.length;
+    if (n <= 300) { buildPreview(); if (cb) cb(); return; }
+    busy('라벨 ' + n.toLocaleString() + '장 만드는 중…');
+    setTimeout(function () {
+      try { buildPreview(); } finally { busy(false); }
+      if (cb) cb();
+    }, 40);
+  }
 
   function setView(v) {
     view = v;
@@ -819,19 +864,19 @@ window.QL = window.QL || {};
     });
     $('#colQty').addEventListener('change', function () { this.dataset.touched = '1'; changed(); });
     $('#sampleRow').addEventListener('change', function () {
-      S.sampleRow = parseInt(this.value, 10) || 0; QL.D.draw(); drawTable();
+      S.sampleRow = parseInt(this.value, 10) || 0; QL.D.draw(); updateStat();
     });
     $('#btnTable').addEventListener('click', function () {
       var w = $('#dataTable');
       w.hidden = !w.hidden;
       this.textContent = w.hidden ? '표로 확인 ▾' : '표 접기 ▴';
-      drawTable();
+      updateStat();
     });
     $('#dataTable').addEventListener('click', function (e) {
       var tr = e.target.closest('tr[data-row]'); if (!tr) return;
       S.sampleRow = parseInt(tr.dataset.row, 10) || 0;
       $('#sampleRow').value = String(S.sampleRow);
-      QL.D.draw(); drawTable();
+      QL.D.draw(); updateStat();
     });
 
     // 요소 추가
@@ -908,12 +953,11 @@ window.QL = window.QL || {};
 
     $('#btnPrint').addEventListener('click', function () {
       setView('preview');
-      ensurePreview();
-      startPrint();
+      ensurePreview(startPrint);          // 다 만든 뒤에 인쇄 대화상자를 연다
     });
     // 인쇄 중에는 #pages 를 body 직속으로 옮겨 조상 레이아웃의 영향을 없앤다
     window.addEventListener('beforeprint', function () {
-      ensurePreview();
+      ensurePreviewSync();
       var pg = $('#pages');
       if (pg.parentNode !== document.body) {
         printHost = pg.parentNode;
@@ -927,8 +971,9 @@ window.QL = window.QL || {};
     window.addEventListener('focus', restoreAfterPrint);
     document.addEventListener('keydown', function (e) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
-        e.preventDefault(); setView('preview'); ensurePreview();
-        startPrint();
+        e.preventDefault();
+        setView('preview');
+        ensurePreview(startPrint);
       }
     });
   }

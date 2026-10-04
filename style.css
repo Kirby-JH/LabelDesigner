@@ -183,6 +183,12 @@ table.dt tbody tr.dupe td.n{color:#b45309; font-weight:700}
 }
 .toast.bad{background:#b91c1c}
 
+/* ---- 만드는 중 표시 ---- */
+.busy{position:fixed; inset:0; z-index:210; display:flex; align-items:center; justify-content:center;
+  background:rgba(238,240,243,.72); backdrop-filter:blur(1px)}
+.busy span{background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 22px;
+  font-size:13px; box-shadow:0 6px 24px rgba(0,0,0,.12)}
+
 /* ---- 좁은 화면용 패널 토글 / 가림막 ---- */
 .paneltgl{display:none; padding:5px 9px; font-size:14px; line-height:1}
 .scrim{position:fixed; inset:0; background:rgba(15,23,42,.35); z-index:98}
@@ -222,7 +228,7 @@ table.dt tbody tr.dupe td.n{color:#b45309; font-weight:700}
   .ctoolbar .lbl{display:none}
 }
 @media print{
-  .toast,.scrim,.paneltgl{display:none !important}
+  .toast,.scrim,.paneltgl,.busy{display:none !important}
 }
 
 @media print{

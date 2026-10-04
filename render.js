@@ -145,10 +145,10 @@ window.QL = window.QL || {};
         var a = +md2[1], b = +md2[2];
         if (okMD(a, b)) {
           out.y = new Date().getFullYear(); out.m = a; out.d = b;
-          out.hasDate = true; out.approxYear = true; consumed = true;
+          out.hasDate = true; consumed = true;
         } else if (a >= 13 && a <= 99 && b >= 1 && b <= 12) {
           out.y = normYear(a); out.m = b; out.d = 1;
-          out.hasDate = true; out.approxDay = true; consumed = true;
+          out.hasDate = true; consumed = true;
         }
         if (consumed) rest = '';
       }
