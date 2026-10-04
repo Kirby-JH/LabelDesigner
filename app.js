@@ -28,10 +28,26 @@ window.QL = window.QL || {};
     setTimeout(go, 4000);                        // 혹시 응답이 없어도 인쇄는 되게
   }
 
+  /* 크롬에서 window.print() 는 미리보기가 떠 있는 동안에도 바로 반환한다.
+     타이머로 되돌리면 미리보기가 다시 그려질 때 내용이 사라지므로,
+     인쇄가 실제로 끝난 뒤(afterprint / 창 복귀)에만 되돌린다. */
+  var restoreTimer = null;
   function restoreAfterPrint() {
+    clearTimeout(restoreTimer);
+    restoreTimer = null;
+    document.body.classList.remove('pp-detached');
     if (!printHost) return;
     printHost.appendChild($('#pages'));
     printHost = null;
+  }
+  function startPrint() {
+    whenFontsReady(function () {
+      setTimeout(function () {
+        window.print();
+        clearTimeout(restoreTimer);
+        restoreTimer = setTimeout(restoreAfterPrint, 120000);   // 끝내 신호가 없을 때만 쓰는 안전망
+      }, 60);
+    });
   }
 
   /* ---------- 용지 프리셋 ---------- */
@@ -893,9 +909,7 @@ window.QL = window.QL || {};
     $('#btnPrint').addEventListener('click', function () {
       setView('preview');
       ensurePreview();
-      whenFontsReady(function () {
-        setTimeout(function () { window.print(); setTimeout(restoreAfterPrint, 300); }, 60);
-      });
+      startPrint();
     });
     // 인쇄 중에는 #pages 를 body 직속으로 옮겨 조상 레이아웃의 영향을 없앤다
     window.addEventListener('beforeprint', function () {
@@ -905,14 +919,16 @@ window.QL = window.QL || {};
         printHost = pg.parentNode;
         document.body.appendChild(pg);
       }
+      document.body.classList.add('pp-detached');
     });
     window.addEventListener('afterprint', restoreAfterPrint);
+    /* 인쇄 대화상자가 떠 있는 동안에는 창이 포커스를 잃는다.
+       다시 돌아왔다는 건 대화상자가 닫혔다는 뜻이라 그때 되돌려도 안전하다. */
+    window.addEventListener('focus', restoreAfterPrint);
     document.addEventListener('keydown', function (e) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
         e.preventDefault(); setView('preview'); ensurePreview();
-        whenFontsReady(function () {
-          setTimeout(function () { window.print(); setTimeout(restoreAfterPrint, 300); }, 60);
-        });
+        startPrint();
       }
     });
   }

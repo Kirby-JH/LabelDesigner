@@ -227,12 +227,24 @@ table.dt tbody tr.dupe td.n{color:#b45309; font-weight:700}
 
 @media print{
   :root{--s:1 !important}
-  html,body{height:auto; overflow:visible; background:#fff; margin:0; padding:0}
-  /* 인쇄 직전 #pages 를 body 직속으로 옮긴다 (app.js) → 조상 레이아웃의 영향을 받지 않음 */
-  body > *{display:none !important}
-  body > #pages{display:block !important; margin:0; padding:0}
-  .pgno,.more,.ghost{display:none !important}
-  .page-wrap{margin:0; width:var(--pw); height:var(--ph); break-after:page; page-break-after:always}
+  html,body{height:auto !important; overflow:visible !important; background:#fff; margin:0; padding:0}
+
+  /* (가) 인쇄 직전 #pages 를 body 직속으로 옮긴 경우 — 기본 경로 */
+  body.pp-detached > *{display:none !important}
+  body.pp-detached > #pages{display:block !important; margin:0; padding:0}
+
+  /* (나) 옮기지 않았거나 이미 되돌린 경우 — 복구 시점이 어긋나도 빈 종이가 안 나오게 */
+  body:not(.pp-detached) > *{display:none !important}
+  /* display:contents 로 중간 상자를 레이아웃에서 빼면 #pages 가 body 직속일 때와 같아진다 */
+  body:not(.pp-detached) > .main{display:contents !important}
+  body:not(.pp-detached) .main > *{display:none !important}
+  body:not(.pp-detached) .main > .center{display:contents !important}
+  body:not(.pp-detached) .center > *{display:none !important}
+  body:not(.pp-detached) .center > .pagesview{display:contents !important}
+
+  .pgno,.more,.ghost,.toast,.scrim,.paneltgl{display:none !important}
+  .page-wrap{margin:0 !important; width:var(--pw); height:var(--ph); break-after:page; page-break-after:always}
   .page-wrap:last-of-type{break-after:auto; page-break-after:auto}
   .page{box-shadow:none; transform:none; width:var(--pw); height:var(--ph)}
+  #pages{margin:0 !important; padding:0 !important; font-size:0}
 }
