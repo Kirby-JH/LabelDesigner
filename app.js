@@ -550,7 +550,7 @@ window.QL = window.QL || {};
       S.elements.forEach(function (el) { if (el.type === 'image' && el.src) imgKB += el.src.length / 1024; });
       toast('자동 저장 실패 — 브라우저 저장 공간을 넘었습니다' +
         (imgKB > 200 ? ' (이미지 ' + Math.round(imgKB) + 'KB)' : '') +
-        '. 지금 「저장」이나 「파일↓」로 보관하세요.', 'bad');
+        '. 브라우저 저장은 이미 가득 찼으니 「파일↓」로 내려받아 두세요.', 'bad');
     }
   }
 
