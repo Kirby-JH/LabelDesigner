@@ -95,41 +95,69 @@ window.QL = window.QL || {};
     if (y < 100) return 1900 + y;
     return y;
   }
-  QL.parseDT = function (v) {
+  /* prefer: '날짜'를 원하는지 '시간'을 원하는지. 모호할 때 어느 쪽으로 읽을지 가른다.
+     점으로 끊긴 수가 두세 개뿐이면 시각보다 날짜가 보편적이라 기본은 날짜 쪽이다. */
+  QL.parseDT = function (v, prefer) {
     if (v == null) return null;
     var str = String(v).trim();
     if (str === '') return null;
+    var wantTime = prefer === 'time';
 
-    /* 엑셀 일련번호 (1899-12-30 기준). 소수부는 하루 중 시각. */
-    if (/^\d{1,6}(\.\d+)?$/.test(str) && parseFloat(str) > 20 && parseFloat(str) < 80000) {
+    /* 엑셀 날짜 일련번호 (1899-12-30 기준).
+       그냥 숫자인 수량·가격을 날짜로 오해하지 않도록 1990~2050 범위만 인정한다.
+       (32874 = 1990-01-01, 54789 = 2050-01-01) */
+    if (/^\d{5}(\.\d+)?$/.test(str)) {
       var n = parseFloat(str);
-      var ms = Math.round((n - 25569) * 86400) * 1000;        // 1970-01-01 기준, 초 단위로 반올림
-      var d0 = new Date(ms);
-      if (!isNaN(d0.getTime())) {
-        return { y: d0.getUTCFullYear(), m: d0.getUTCMonth() + 1, d: d0.getUTCDate(),
-          H: d0.getUTCHours(), M: d0.getUTCMinutes(), S: d0.getUTCSeconds(), hasDate: true,
-          hasTime: n % 1 !== 0 };
+      if (n >= 32874 && n < 54789) {
+        var d0 = new Date(Math.round((n - 25569) * 86400) * 1000);
+        if (!isNaN(d0.getTime())) {
+          return { y: d0.getUTCFullYear(), m: d0.getUTCMonth() + 1, d: d0.getUTCDate(),
+            H: d0.getUTCHours(), M: d0.getUTCMinutes(), S: d0.getUTCSeconds(),
+            hasDate: true, hasTime: n % 1 !== 0 };
+        }
       }
     }
 
     var out = { y: 0, m: 0, d: 0, H: 0, M: 0, S: 0, hasDate: false, hasTime: false };
-    var rest = str;
+    var rest = str, consumed = false;
 
-    var md = str.match(/(\d{4}|\d{2})\s*[.\-\/년]\s*(\d{1,2})\s*[.\-\/월]\s*(\d{1,2})\s*일?/);
-    if (md && (+md[2] < 1 || +md[2] > 12 || +md[3] < 1 || +md[3] > 31)) md = null;  // 14.30.00 같은 시각을 날짜로 오해하지 않게
-    if (md) {
+    function okMD(m, d) { return m >= 1 && m <= 12 && d >= 1 && d <= 31; }
+
+    /* 연·월·일 세 토막 */
+    var md = str.match(/(\d{1,4})\s*[.\-\/년]\s*(\d{1,2})\s*[.\-\/월]\s*(\d{1,2})\s*일?/);
+    if (md && okMD(+md[2], +md[3])) {
       out.y = normYear(md[1]); out.m = +md[2]; out.d = +md[3]; out.hasDate = true;
-      rest = str.slice(md.index + md[0].length);
+      rest = str.slice(md.index + md[0].length); consumed = true;
     } else {
       var m8 = str.match(/(^|\D)(\d{4})(\d{2})(\d{2})(\D|$)/);
-      if (m8) {
+      if (m8 && okMD(+m8[3], +m8[4])) {
         out.y = +m8[2]; out.m = +m8[3]; out.d = +m8[4]; out.hasDate = true;
-        rest = str.slice(m8.index + m8[0].length);
+        rest = str.slice(m8.index + m8[0].length); consumed = true;
       }
     }
 
-    var mt = rest.match(/(\d{1,2})\s*[:.\-시]\s*(\d{1,2})(?:\s*[:.\-분]\s*(\d{1,2}))?\s*초?/);
-    if (mt && +mt[1] < 24 && +mt[2] < 60) {
+    /* 두 토막뿐일 때 (10.04 / 25.10). 시각을 달라고 한 경우엔 건너뛴다.
+         1~12 . 1~31  → 월.일  (연도는 올해로)
+         13~99 . 1~12 → 연.월  (유통기한에 흔한 형태, 일은 1일로) */
+    if (!consumed && !wantTime) {
+      var md2 = str.match(/^\s*(\d{1,2})\s*[.\-\/년월]\s*(\d{1,2})\s*[일월]?\s*$/);
+      if (md2) {
+        var a = +md2[1], b = +md2[2];
+        if (okMD(a, b)) {
+          out.y = new Date().getFullYear(); out.m = a; out.d = b;
+          out.hasDate = true; out.approxYear = true; consumed = true;
+        } else if (a >= 13 && a <= 99 && b >= 1 && b <= 12) {
+          out.y = normYear(a); out.m = b; out.d = 1;
+          out.hasDate = true; out.approxDay = true; consumed = true;
+        }
+        if (consumed) rest = '';
+      }
+    }
+
+    /* 시각 구분자는 콜론과 한글(시/분)만 인정한다.
+       점으로 끊긴 숫자는 날짜 뒤에 붙어 있더라도 시각으로 보지 않는다. */
+    var mt = rest.match(/(\d{1,2})\s*[:시]\s*(\d{1,2})(?:\s*[:분]\s*(\d{1,2}))?\s*초?/);
+    if (mt && +mt[1] < 24 && +mt[2] < 60 && (!mt[3] || +mt[3] < 60)) {
       out.H = +mt[1]; out.M = +mt[2]; out.S = mt[3] ? +mt[3] : 0; out.hasTime = true;
     }
     return (out.hasDate || out.hasTime) ? out : null;
@@ -160,11 +188,11 @@ window.QL = window.QL || {};
 
     switch (name) {
       case '날짜': case 'date': {
-        var p = QL.parseDT(val);
+        var p = QL.parseDT(val, 'date');
         return p && p.hasDate ? fmtParts(p, arg || 'YYYY-MM-DD') : '';
       }
       case '시간': case 'time': {
-        var q = QL.parseDT(val);
+        var q = QL.parseDT(val, 'time');
         return q && q.hasTime ? fmtParts(q, arg || 'HH:mm') : '';
       }
       case '숫자': return val.replace(/\D/g, '');
