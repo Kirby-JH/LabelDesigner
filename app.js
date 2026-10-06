@@ -17,7 +17,7 @@ window.QL = window.QL || {};
     label: { w: 60, h: 40 },
     snap: true, scale: 1
   };
-  var workbook = null, previewDirty = true, view = 'design', redrawT = null, printHost = null;
+  var workbook = null, previewDirty = true, view = 'design', redrawT = null;
 
   /* 글꼴이 다 도착한 뒤에 인쇄해야 대체 글꼴로 찍히지 않는다 */
   function whenFontsReady(cb) {
@@ -28,25 +28,14 @@ window.QL = window.QL || {};
     setTimeout(go, 4000);                        // 혹시 응답이 없어도 인쇄는 되게
   }
 
-  /* 크롬에서 window.print() 는 미리보기가 떠 있는 동안에도 바로 반환한다.
-     타이머로 되돌리면 미리보기가 다시 그려질 때 내용이 사라지므로,
-     인쇄가 실제로 끝난 뒤(afterprint / 창 복귀)에만 되돌린다. */
-  var restoreTimer = null;
-  function restoreAfterPrint() {
-    clearTimeout(restoreTimer);
-    restoreTimer = null;
-    document.body.classList.remove('pp-detached');
-    if (!printHost) return;
-    printHost.appendChild($('#pages'));
-    printHost = null;
-  }
+  /* 인쇄 중에는 DOM 을 전혀 건드리지 않는다.
+     예전에는 #pages 를 body 직속으로 옮겼다가 인쇄가 끝나면 되돌렸는데,
+     크롬 미리보기는 window.print() 가 반환한 뒤에도 계속 다시 그린다.
+     그 사이에 되돌리면 인쇄 CSS 가 찾을 것이 없어져 빈 종이가 나왔다.
+     지금은 인쇄 CSS 가 있는 그대로의 구조를 쓰므로 되돌릴 일이 없다. */
   function startPrint() {
     whenFontsReady(function () {
-      setTimeout(function () {
-        window.print();
-        clearTimeout(restoreTimer);
-        restoreTimer = setTimeout(restoreAfterPrint, 120000);   // 끝내 신호가 없을 때만 쓰는 안전망
-      }, 60);
+      setTimeout(function () { window.print(); }, 60);
     });
   }
 
@@ -955,20 +944,8 @@ window.QL = window.QL || {};
       setView('preview');
       ensurePreview(startPrint);          // 다 만든 뒤에 인쇄 대화상자를 연다
     });
-    // 인쇄 중에는 #pages 를 body 직속으로 옮겨 조상 레이아웃의 영향을 없앤다
-    window.addEventListener('beforeprint', function () {
-      ensurePreviewSync();
-      var pg = $('#pages');
-      if (pg.parentNode !== document.body) {
-        printHost = pg.parentNode;
-        document.body.appendChild(pg);
-      }
-      document.body.classList.add('pp-detached');
-    });
-    window.addEventListener('afterprint', restoreAfterPrint);
-    /* 인쇄 대화상자가 떠 있는 동안에는 창이 포커스를 잃는다.
-       다시 돌아왔다는 건 대화상자가 닫혔다는 뜻이라 그때 되돌려도 안전하다. */
-    window.addEventListener('focus', restoreAfterPrint);
+    /* 브라우저가 직접 인쇄를 시작한 경우(네이티브 Ctrl+P 등)에도 내용이 있도록 */
+    window.addEventListener('beforeprint', ensurePreviewSync);
     document.addEventListener('keydown', function (e) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
         e.preventDefault();

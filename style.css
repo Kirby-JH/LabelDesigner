@@ -235,22 +235,19 @@ table.dt tbody tr.dupe td.n{color:#b45309; font-weight:700}
   :root{--s:1 !important}
   html,body{height:auto !important; overflow:visible !important; background:#fff; margin:0; padding:0}
 
-  /* (가) 인쇄 직전 #pages 를 body 직속으로 옮긴 경우 — 기본 경로 */
-  body.pp-detached > *{display:none !important}
-  body.pp-detached > #pages{display:block !important; margin:0; padding:0}
+  /* 인쇄할 때는 #pages 로 가는 길만 남기고 전부 숨긴다. DOM 은 건드리지 않는다.
+     중간 컨테이너는 display:contents 로 레이아웃에서 빼야 한다.
+     블록 상자로 남겨 두면 쪽나눔에 끼어들어 빈 종이가 생긴다. */
+  body > *{display:none !important}
+  body > .main{display:contents !important}
+  .main > *{display:none !important}
+  .main > .center{display:contents !important}
+  .center > *{display:none !important}
+  .center > .pagesview{display:contents !important}
 
-  /* (나) 옮기지 않았거나 이미 되돌린 경우 — 복구 시점이 어긋나도 빈 종이가 안 나오게 */
-  body:not(.pp-detached) > *{display:none !important}
-  /* display:contents 로 중간 상자를 레이아웃에서 빼면 #pages 가 body 직속일 때와 같아진다 */
-  body:not(.pp-detached) > .main{display:contents !important}
-  body:not(.pp-detached) .main > *{display:none !important}
-  body:not(.pp-detached) .main > .center{display:contents !important}
-  body:not(.pp-detached) .center > *{display:none !important}
-  body:not(.pp-detached) .center > .pagesview{display:contents !important}
-
-  .pgno,.more,.ghost,.toast,.scrim,.paneltgl{display:none !important}
+  .pgno,.more,.ghost,.toast,.scrim,.paneltgl,.busy{display:none !important}
+  #pages{margin:0 !important; padding:0 !important; font-size:0}
   .page-wrap{margin:0 !important; width:var(--pw); height:var(--ph); break-after:page; page-break-after:always}
   .page-wrap:last-of-type{break-after:auto; page-break-after:auto}
   .page{box-shadow:none; transform:none; width:var(--pw); height:var(--ph)}
-  #pages{margin:0 !important; padding:0 !important; font-size:0}
 }
