@@ -293,6 +293,25 @@ window.QL = window.QL || {};
     return false;
   }
 
+  /* 조건식 왼쪽에 열이 아닌 이름을 쓰면 그 이름 자체가 글자값으로 비교된다.
+     ({?재고량>10} 에서 재고량 이란 열이 없으면 "재고량" > "10" 이 되어 늘 참)
+     오타를 조용히 넘기지 않도록 그런 이름을 모아 둔다. */
+  QL.lintConds = function (tpl, headers) {
+    var out = [];
+    String(tpl || '').replace(/\{\?([^{}]*)\}/g, function (m, expr) {
+      expr = String(expr).trim();
+      var mm = expr.match(/^([\s\S]*?)\s*(>=|<=|!=|<>|=|>|<|포함|시작|끝)\s*([\s\S]*)$/);
+      var left = (mm ? mm[1] : expr).trim();
+      if (!left) return m;
+      if (/^['"][\s\S]*['"]$/.test(left)) return m;        // 따옴표로 감싼 건 일부러 쓴 글자값
+      if (/^-?[\d.,]+$/.test(left)) return m;               // 숫자거나 열 번호
+      if (headers && headers.indexOf(left) >= 0) return m;   // 실제 열
+      out.push(left);
+      return m;
+    });
+    return out;
+  };
+
   var COND_RE = /\{\?([^{}]*)\}((?:(?!\{\?)(?!\{\/\})[\s\S])*?)(?:\{:\}((?:(?!\{\?)(?!\{\/\})[\s\S])*?))?\{\/\}/;
   function resolveConds(tpl, row, headers) {
     var guard = 0;

@@ -169,21 +169,54 @@ window.QL = window.QL || {};
     sel.value = String(S.sampleRow);
   }
 
-  function drawWarn(v) {
-    var el = $('#dataWarn');
-    if (!S.rows.length || !v) { el.hidden = true; return; }
-    var rows = Object.keys(v.prob).map(function (i) { return +i + 1; });
-    if (!rows.length) { el.hidden = true; return; }
-    var head = rows.slice(0, 8).join(', ') + (rows.length > 8 ? ' 외 ' + (rows.length - 8) + '행' : '');
-    el.hidden = false;
-    el.innerHTML = '바코드 형식 오류 <b>' + rows.length.toLocaleString() + '행</b> — ' + head +
-      '<br><span style="opacity:.8">' + QL.esc(v.prob[rows[0] - 1][0]) + '</span>' +
-      (v.truncated ? '<br><span style="opacity:.8">※ ' + v.from.toLocaleString() + '~' +
-        v.to.toLocaleString() + '행까지만 검사했습니다 (한 번에 ' +
-        VALIDATE_MAX.toLocaleString() + '행)</span>' : '');
+  /* 조건식에 쓴 이름 중 열이 아닌 것 찾기 (데이터가 있을 때만 의미가 있다) */
+  function lintTemplates() {
+    var bad = {};
+    if (!S.headers.length) return bad;
+    S.elements.forEach(function (el) {
+      if (!el.tpl) return;
+      QL.lintConds(el.tpl, S.headers).forEach(function (n) {
+        if (!bad[n]) bad[n] = [];
+        var who = el.name || el.type;
+        if (bad[n].indexOf(who) < 0) bad[n].push(who);
+      });
+    });
+    return bad;
   }
 
-  /* ---------- 번호 생성 ----------
+  function drawWarn(v) {
+    var el = $('#dataWarn');
+    var msgs = [];
+
+    if (S.rows.length && v) {
+      var rows = Object.keys(v.prob).map(function (i) { return +i + 1; });
+      if (rows.length) {
+        var head = rows.slice(0, 8).join(', ') + (rows.length > 8 ? ' 외 ' + (rows.length - 8) + '행' : '');
+        msgs.push('바코드 형식 오류 <b>' + rows.length.toLocaleString() + '행</b> — ' + head +
+          '<br><span style="opacity:.8">' + QL.esc(v.prob[rows[0] - 1][0]) + '</span>' +
+          (v.truncated ? '<br><span style="opacity:.8">※ ' + v.from.toLocaleString() + '~' +
+            v.to.toLocaleString() + '행까지만 검사했습니다 (한 번에 ' +
+            VALIDATE_MAX.toLocaleString() + '행)</span>' : ''));
+      }
+    }
+
+    var lint = lintTemplates();
+    var names = Object.keys(lint);
+    if (names.length) {
+      msgs.push('조건식에 없는 열 이름 <b>' + names.length + '개</b> — ' +
+        names.slice(0, 5).map(function (n) {
+          return '<code>' + QL.esc(n) + '</code>(' + QL.esc(lint[n].join(', ')) + ')';
+        }).join(', ') +
+        '<br><span style="opacity:.8">열이 아닌 이름은 글자 그대로 비교되어 조건이 늘 맞거나 늘 틀립니다. ' +
+        '글자값을 일부러 쓰려면 따옴표로 감싸세요.</span>');
+    }
+
+    if (!msgs.length) { el.hidden = true; return; }
+    el.hidden = false;
+    el.innerHTML = msgs.join('<hr style="border:0;border-top:1px solid #fecaca;margin:6px 0">');
+  }
+
+  /* ---------- 번호 생성 ----------  /* ---------- 번호 생성 ----------
      데이터 없이 번호만 찍을 때 쓴다. 별도 모드가 아니라 데이터를 만들어 넣는
      방식이라, 표·검증·조건문·출력 범위 같은 기존 기능이 그대로 적용된다.
      끝 번호가 시작보다 작으면 내려가며 센다. */
