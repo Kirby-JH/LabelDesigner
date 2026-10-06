@@ -41,6 +41,7 @@
       <div class="segs full" id="srcTabs">
         <button data-src="paste" class="on" type="button">붙여넣기</button>
         <button data-src="file" type="button">파일</button>
+        <button data-src="gen" type="button">번호 생성</button>
       </div>
 
       <div id="srcPaste">
@@ -56,6 +57,23 @@
         <input type="file" id="fileInput" accept=".xlsx,.xls,.csv,.txt" hidden>
         <div class="f" id="sheetWrap" hidden><label>시트</label><select id="sheetSel"></select></div>
         <p class="hint" id="fileName"></p>
+      </div>
+
+      <div id="srcGen" hidden>
+        <div class="f2">
+          <div class="f"><label>시작 번호</label><input type="number" id="genFrom" value="1"></div>
+          <div class="f"><label>끝 번호</label><input type="number" id="genTo" value="100"></div>
+        </div>
+        <div class="f2">
+          <div class="f"><label>간격</label><input type="number" id="genStep" value="1" min="1"></div>
+          <div class="f"><label>자릿수 (0 = 그대로)</label><input type="number" id="genPad" value="0" min="0" max="12"></div>
+        </div>
+        <div class="f2">
+          <div class="f"><label>접두사</label><input type="text" id="genPre" placeholder="예: A-"></div>
+          <div class="f"><label>접미사</label><input type="text" id="genSuf"></div>
+        </div>
+        <div class="f"><label>열 이름</label><input type="text" id="genCol" value="번호"></div>
+        <p class="hint" id="genInfo"></p>
       </div>
 
       <div class="chk"><input type="checkbox" id="hasHeader" checked><label for="hasHeader">첫 행을 머리글로 사용</label></div>

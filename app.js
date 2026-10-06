@@ -183,6 +183,56 @@ window.QL = window.QL || {};
         VALIDATE_MAX.toLocaleString() + '행)</span>' : '');
   }
 
+  /* ---------- 번호 생성 ----------
+     데이터 없이 번호만 찍을 때 쓴다. 별도 모드가 아니라 데이터를 만들어 넣는
+     방식이라, 표·검증·조건문·출력 범위 같은 기존 기능이 그대로 적용된다.
+     끝 번호가 시작보다 작으면 내려가며 센다. */
+  var GEN_MAX = 100000;
+
+  function genRows() {
+    var from = parseInt($('#genFrom').value, 10);
+    var to = parseInt($('#genTo').value, 10);
+    var step = Math.max(1, Math.abs(parseInt($('#genStep').value, 10) || 1));
+    var pad = Math.max(0, Math.min(12, parseInt($('#genPad').value, 10) || 0));
+    var pre = $('#genPre').value, suf = $('#genSuf').value;
+    var col = ($('#genCol').value || '').trim() || '번호';
+    if (!isFinite(from)) from = 1;
+    if (!isFinite(to)) to = from;
+
+    var down = to < from;
+    var count = Math.floor(Math.abs(to - from) / step) + 1;
+    var clipped = count > GEN_MAX;
+    if (clipped) count = GEN_MAX;
+
+    var rows = [], i, n, t;
+    for (i = 0; i < count; i++) {
+      n = down ? from - i * step : from + i * step;
+      t = String(Math.abs(n));
+      while (t.length < pad) t = '0' + t;
+      rows.push([pre + (n < 0 ? '-' : '') + t + suf]);
+    }
+    S.headers = [col];
+    S.rows = rows;
+    S.sampleRow = 0;
+
+    $('#genInfo').innerHTML = rows.length
+      ? from.toLocaleString() + ' → ' + to.toLocaleString() + (down ? ' (내림차순)' : '') +
+        ' · <b>' + rows.length.toLocaleString() + '행</b> 생성' +
+        (rows.length ? ' (' + QL.esc(rows[0][0]) + ' … ' + QL.esc(rows[rows.length - 1][0]) + ')' : '') +
+        (clipped ? '<br>한 번에 ' + GEN_MAX.toLocaleString() + '행까지만 만듭니다.' : '')
+      : '만들 번호가 없습니다.';
+    fillQtySelect();
+    changed();
+  }
+
+  /* 현재 고른 입력 방식대로 데이터를 다시 읽는다 */
+  function reloadSource() {
+    var m = $('#srcTabs').querySelector('button.on').dataset.src;
+    if (m === 'gen') genRows();
+    else if (m === 'file' && workbook) loadSheet();
+    else setTable(parsePasted($('#pasteArea').value));
+  }
+
   /* ---------- 인쇄 항목 ----------
      수만 행이 들어와도 범위 밖 행은 수량만 세고 넘어간다.
      실제 항목 객체는 출력할 구간에 대해서만 만든다. */
@@ -501,7 +551,7 @@ window.QL = window.QL || {};
   }
 
   /* ---------- 저장/복원 ---------- */
-  var IDS = ['hasHeader', 'colQty', 'repeat', 'skipEmpty', 'dedupe', 'paperMode', 'rollPreset',
+  var IDS = ['hasHeader', 'colQty', 'repeat', 'genFrom', 'genTo', 'genStep', 'genPad', 'genPre', 'genSuf', 'genCol', 'skipEmpty', 'dedupe', 'paperMode', 'rollPreset',
     'labelW', 'labelH', 'rollGap', 'rotate', 'sheetPreset', 'pageW', 'pageH', 'cols', 'rows',
     'sLabelW', 'sLabelH', 'gapX', 'gapY', 'autoMargin', 'marginL', 'marginT', 'startAt', 'rangeBy', 'rangeFrom', 'rangeTo',
     'offX', 'offY', 'border', 'snap', 'unit'];
@@ -517,7 +567,7 @@ window.QL = window.QL || {};
   }
   var saveWarned = false;
   function save() {
-    var base = { set: collect(), elements: S.elements };
+    var base = { set: collect(), elements: S.elements, src: activeSrc() };
     var paste = $('#pasteArea').value;
     function put(withPaste) {
       base.paste = withPaste ? paste : '';
@@ -543,6 +593,20 @@ window.QL = window.QL || {};
     }
   }
 
+  function activeSrc() {
+    var b = $('#srcTabs').querySelector('button.on');
+    return b ? b.dataset.src : 'paste';
+  }
+  function setSrc(m) {
+    var btn = $('#srcTabs').querySelector('button[data-src="' + m + '"]');
+    if (!btn) return;
+    $$('#srcTabs button').forEach(function (x) { x.classList.toggle('on', x === btn); });
+    $('#srcPaste').hidden = m !== 'paste';
+    $('#srcFile').hidden = m !== 'file';
+    $('#srcGen').hidden = m !== 'gen';
+    $('#hasHeader').disabled = m === 'gen';
+  }
+
   function applySettings(o) {
     IDS.forEach(function (id) {
       if (!(id in o)) return;
@@ -558,6 +622,7 @@ window.QL = window.QL || {};
     if (o.set) applySettings(o.set);
     if (o.elements && o.elements.length) S.elements = o.elements;
     if (o.paste) $('#pasteArea').value = o.paste;
+    if (o.src) setSrc(o.src);
     return true;
   }
 
@@ -814,9 +879,14 @@ window.QL = window.QL || {};
     });
     $('#srcTabs').addEventListener('click', function (e) {
       var b = e.target.closest('button[data-src]'); if (!b) return;
-      $$('#srcTabs button').forEach(function (x) { x.classList.toggle('on', x === b); });
-      $('#srcPaste').hidden = b.dataset.src !== 'paste';
-      $('#srcFile').hidden = b.dataset.src !== 'file';
+      setSrc(b.dataset.src);
+      reloadSource();
+      save();
+    });
+    ['genFrom', 'genTo', 'genStep', 'genPad', 'genPre', 'genSuf', 'genCol'].forEach(function (id) {
+      $('#' + id).addEventListener('input', function () {
+        if (!$('#srcGen').hidden) genRows();
+      });
     });
 
     var pt = null;
@@ -848,9 +918,7 @@ window.QL = window.QL || {};
     });
     $('#drop').addEventListener('drop', function (e) { if (e.dataTransfer.files[0]) readFile(e.dataTransfer.files[0]); });
     $('#sheetSel').addEventListener('change', loadSheet);
-    $('#hasHeader').addEventListener('change', function () {
-      if (workbook) loadSheet(); else setTable(parsePasted($('#pasteArea').value));
-    });
+    $('#hasHeader').addEventListener('change', reloadSource);
     $('#colQty').addEventListener('change', function () { this.dataset.touched = '1'; changed(); });
     $('#sampleRow').addEventListener('change', function () {
       S.sampleRow = parseInt(this.value, 10) || 0; QL.D.draw(); updateStat();
@@ -974,7 +1042,8 @@ window.QL = window.QL || {};
     syncLabelSize();
     QL.D.init(S, function () { previewDirty = true; save(); updateStat(); });
     if (!restored || !S.elements.length) seedDefault();
-    if ($('#pasteArea').value.trim()) setTable(parsePasted($('#pasteArea').value));
+    if (activeSrc() === 'gen') genRows();
+    else if ($('#pasteArea').value.trim()) setTable(parsePasted($('#pasteArea').value));
     else setTable([]);
     if (document.fonts && document.fonts.addEventListener) {
       document.fonts.addEventListener('loadingdone', function () {
