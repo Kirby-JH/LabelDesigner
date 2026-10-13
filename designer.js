@@ -537,6 +537,117 @@ window.QL = window.QL || {};
   }
   D.redrawCanvasOnly = redrawCanvasOnly;
 
+  /* ---------- 내용 편집 팝오버 ----------
+     캔버스에 보이는 건 치환된 결과(제주 삼다수)지만 실제 내용은 템플릿({2})이다.
+     제자리에서 고치게 하면 편집에 들어가는 순간 글자가 바뀌어 보이고,
+     확대·회전된 상자 안이라 한글 입력도 불안하다.
+     그래서 요소 옆에 변형이 걸리지 않은 편집창을 띄우고 원본과 결과를 함께 보여 준다. */
+  var editing = null;
+
+  function closeEditor(cancel) {
+    if (!editing) return;
+    var e = editing;
+    editing = null;
+    if (cancel) e.el.tpl = e.before;
+    if (e.pop && e.pop.parentNode) e.pop.remove();
+    document.removeEventListener('pointerdown', onDocDown, true);
+    if (cancel) hist.pending = null; else commit();
+    D.draw();
+    D.onChange();
+  }
+  D.closeEditor = closeEditor;
+
+  function onDocDown(ev) {
+    if (!editing) return;
+    if (editing.pop.contains(ev.target)) return;
+    closeEditor(false);                      // 바깥을 누르면 적용하고 닫는다
+  }
+
+  function previewOf(el) {
+    var row = S.rows.length ? S.rows[Math.min(S.sampleRow, S.rows.length - 1)] : null;
+    var v = QL.resolve(el.tpl, row, S.headers, previewCtx());
+    if (el.type === 'barcode') {
+      if (!v) return { text: '값이 비어 있음', bad: true };
+      if (!QL.barcodeValid(v, el.fmt || 'CODE128'))
+        return { text: v + '  — ' + (el.fmt || 'CODE128') + ' 형식에 맞지 않음', bad: true };
+    }
+    return { text: v, bad: false };
+  }
+
+  D.editTpl = function (el) {
+    if (!el || !('tpl' in el)) return;
+    closeEditor(false);
+    begin();                                 // 편집 한 번이 실행 취소 1단계
+
+    var pop = document.createElement('div');
+    pop.className = 'tpop';
+    pop.innerHTML =
+      '<div class="ttl"><b>' + esc(el.name || el.type) + '</b>' +
+      '<span>내용 — 열 이름은 {이름}</span></div>' +
+      '<textarea spellcheck="false"></textarea>' +
+      '<div class="row"><select class="ins"><option value="">열 · 변수 넣기…</option>' +
+      colOptions() + '</select><button class="btn-s" data-act="ins">삽입</button></div>' +
+      '<div class="pv"></div>' +
+      '<div class="keys"><span>Esc 취소</span><span>Ctrl+Enter 적용 · 바깥 클릭도 적용</span></div>';
+    document.body.appendChild(pop);
+
+    var ta = pop.querySelector('textarea');
+    var pv = pop.querySelector('.pv');
+    ta.value = el.tpl == null ? '' : el.tpl;
+
+    function refresh() {
+      var p = previewOf(el);
+      pv.className = 'pv' + (p.bad ? ' bad' : '');
+      pv.innerHTML = p.text ? '<em>결과 </em>' + esc(p.text) : '<em>결과 없음</em>';
+    }
+    function apply() {
+      el.tpl = ta.value;
+      redrawCanvasOnly();
+      var d = $('#canvas [data-id="' + el.id + '"]');
+      if (d) d.classList.add('editing');
+      refresh();
+    }
+
+    ta.addEventListener('input', apply);
+    ta.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Escape') { ev.preventDefault(); ev.stopPropagation(); closeEditor(true); }
+      else if (ev.key === 'Enter' && (ev.ctrlKey || ev.metaKey)) { ev.preventDefault(); closeEditor(false); }
+      ev.stopPropagation();                  // 캔버스 단축키(Delete 등)와 겹치지 않게
+    });
+    pop.querySelector('[data-act="ins"]').addEventListener('click', function () {
+      var sel = pop.querySelector('.ins');
+      if (!sel.value) return;
+      var ins = sel.value.charAt(0) === RAW ? sel.value.slice(1) : '{' + sel.value + '}';
+      var a = ta.selectionStart == null ? ta.value.length : ta.selectionStart;
+      var b = ta.selectionEnd == null ? a : ta.selectionEnd;
+      ta.value = ta.value.slice(0, a) + ins + ta.value.slice(b);
+      ta.focus();
+      ta.setSelectionRange(a + ins.length, a + ins.length);
+      apply();
+    });
+
+    editing = { el: el, before: el.tpl, pop: pop };
+    place(pop, el);
+    refresh();
+    var d0 = $('#canvas [data-id="' + el.id + '"]');
+    if (d0) d0.classList.add('editing');
+    ta.focus();
+    ta.setSelectionRange(ta.value.length, ta.value.length);
+    setTimeout(function () { document.addEventListener('pointerdown', onDocDown, true); }, 0);
+  };
+
+  /* 요소 아래에 붙이되 화면 밖으로 나가지 않게 */
+  function place(pop, el) {
+    var d = $('#canvas [data-id="' + el.id + '"]');
+    var r = d ? d.getBoundingClientRect() : { left: 80, top: 80, bottom: 120, right: 200 };
+    var w = pop.offsetWidth, h = pop.offsetHeight;
+    var left = Math.min(Math.max(8, r.left), window.innerWidth - w - 8);
+    var top = r.bottom + 8;
+    if (top + h > window.innerHeight - 8) top = Math.max(8, r.top - h - 8);
+    pop.style.left = left + 'px';
+    pop.style.top = top + 'px';
+  }
+
   /* ---------- 캔버스 조작 ---------- */
   function stageMM(e) {
     var r = $('#stage').getBoundingClientRect(), k = MM2PX * S.scale;
@@ -604,7 +715,15 @@ window.QL = window.QL || {};
   function bindCanvas() {
     var stage = $('#stage');
 
+    stage.addEventListener('dblclick', function (e) {
+      var d = e.target.closest('.el');
+      if (!d) return;
+      var el = byId(d.dataset.id);
+      if (el && !el.locked && 'tpl' in el) { e.preventDefault(); D.editTpl(el); }
+    });
+
     stage.addEventListener('pointerdown', function (e) {
+      if (editing) closeEditor(false);        // 캔버스를 누르면 편집을 끝낸다
       var hn = e.target.closest('.handle');
       var elDiv = e.target.closest('.el');
       var additive = e.shiftKey || e.ctrlKey || e.metaKey;
@@ -753,6 +872,10 @@ window.QL = window.QL || {};
         return;
       }
       if (e.key === 'Escape') { S.selIds = []; D.draw(); return; }
+      if (e.key === 'F2' || e.key === 'Enter') {
+        var one = D.sel();
+        if (one && 'tpl' in one && !one.locked) { e.preventDefault(); D.editTpl(one); return; }
+      }
 
       var list = D.selAll(); if (!list.length) return;
       var step = e.shiftKey ? 1 : 0.2, used = true, dx = 0, dy = 0;
