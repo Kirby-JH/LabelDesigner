@@ -543,6 +543,7 @@ window.QL = window.QL || {};
      확대·회전된 상자 안이라 한글 입력도 불안하다.
      그래서 요소 옆에 변형이 걸리지 않은 편집창을 띄우고 원본과 결과를 함께 보여 준다. */
   var editing = null;
+  var lastDown = { id: null, t: 0 };
 
   function closeEditor(cancel) {
     if (!editing) return;
@@ -715,13 +716,6 @@ window.QL = window.QL || {};
   function bindCanvas() {
     var stage = $('#stage');
 
-    stage.addEventListener('dblclick', function (e) {
-      var d = e.target.closest('.el');
-      if (!d) return;
-      var el = byId(d.dataset.id);
-      if (el && !el.locked && 'tpl' in el) { e.preventDefault(); D.editTpl(el); }
-    });
-
     stage.addEventListener('pointerdown', function (e) {
       if (editing) closeEditor(false);        // 캔버스를 누르면 편집을 끝낸다
       var hn = e.target.closest('.handle');
@@ -730,6 +724,19 @@ window.QL = window.QL || {};
       var st = stageMM(e);
 
       if (elDiv && isLocked(elDiv.dataset.id)) elDiv = null;   // 잠긴 요소는 통과
+
+      /* 더블클릭 직접 감지.
+         드래그 때문에 포인터 캡처를 걸면 pointerup 의 대상이 바뀌어
+         브라우저가 click·dblclick 을 만들지 않으므로 네이티브 이벤트를 쓸 수 없다. */
+      if (elDiv) {
+        var nowT = Date.now();
+        if (lastDown.id === elDiv.dataset.id && nowT - lastDown.t < 450) {
+          lastDown.t = 0;
+          var dbl = byId(elDiv.dataset.id);
+          if (dbl && 'tpl' in dbl) { e.preventDefault(); D.editTpl(dbl); return; }
+        }
+        lastDown = { id: elDiv.dataset.id, t: nowT };
+      } else lastDown = { id: null, t: 0 };
 
       /* 빈 곳 → 영역 선택 시작 */
       if (!hn && !elDiv) {
