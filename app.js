@@ -491,6 +491,23 @@ window.QL = window.QL || {};
         (n ? (c.seqOffset + 1).toLocaleString() + '~' + (c.seqOffset + n).toLocaleString() + '장' : '없음');
     }
 
+    /* 드라이버 용지와 맞추라고 실제 인쇄 페이지 치수를 보여 준다.
+       치수가 다르면 브라우저가 맞춤 배율로 줄여 그려 흐릿해진다. */
+    var pw, ph, land;
+    if (o.mode === 'roll') {
+      var sw = (o.rot === 90 || o.rot === 270);
+      pw = sw ? o.labelH : o.labelW;
+      ph = (sw ? o.labelW : o.labelH) + o.gap;
+    } else { pw = o.pageW; ph = o.pageH; }
+    land = pw > ph;
+    $('#pageSizeInfo').innerHTML =
+      '인쇄 페이지 <b>' + QL.U.to(pw) + ' × ' + QL.U.to(ph) + ' ' + QL.U.label() + '</b>' +
+      ' · ' + (land ? '가로 방향' : '세로 방향') +
+      (o.mode === 'roll' && o.gap
+        ? '<br><span style="opacity:.8">라벨 ' + QL.U.to(o.labelH) + ' + 간격 ' +
+          QL.U.to(o.gap) + ' 이 더해진 값입니다. 드라이버 용지가 라벨 크기뿐이면 간격을 0 으로 두세요.</span>'
+        : '');
+
     var sum = $('#dataSummary');
     if (!S.rows.length) {
       sum.className = 'note';

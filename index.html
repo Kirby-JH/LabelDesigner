@@ -119,7 +119,10 @@
             </select>
           </div>
         </div>
-        <p class="hint">라벨 1장 = 인쇄 1페이지로 내보냅니다. 프린터 드라이버의 용지 크기도 같은 치수(간격 포함)로 맞추세요.</p>
+        <p class="hint">라벨 1장 = 인쇄 1페이지로 내보냅니다.
+          <b>프린터 드라이버의 용지 크기를 아래 「인쇄 페이지」 치수와 똑같이</b> 맞추세요.
+          다르면 브라우저가 크기를 맞추느라 축소·확대해서 흐릿해집니다.
+          출력물이 뒤집혀 나오면 <b>인쇄 방향</b>으로 되돌리세요.</p>
       </div>
 
       <div id="sheetOpts" hidden>
@@ -163,6 +166,7 @@
         <div class="f"><label>인쇄 보정 ↔ (<span class="u">mm</span>)</label><input type="number" id="offX" value="0" step="0.1"></div>
         <div class="f"><label>인쇄 보정 ↕ (<span class="u">mm</span>)</label><input type="number" id="offY" value="0" step="0.1"></div>
       </div>
+      <div class="note" id="pageSizeInfo"></div>
       <div class="chk"><input type="checkbox" id="border"><label for="border">라벨 가장자리 선 인쇄</label></div>
     </section>
   </aside>
