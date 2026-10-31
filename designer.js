@@ -155,6 +155,7 @@ window.QL = window.QL || {};
       if (i >= 0) S.selIds.splice(i, 1); else S.selIds.push(id);
     } else S.selIds = [id];
     D.draw();
+    D.revealSel();
   };
 
   /* 회전을 반영한 요소 하나의 외곽 상자 */
@@ -183,6 +184,25 @@ window.QL = window.QL || {};
     });
     return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
   }
+
+  /* 선택한 요소를 보이게 스크롤한다.
+     라벨 밖으로 내보낸 요소는 #stagewrap 의 스크롤 영역에는 들어 있지만
+     저절로 따라가지 않아 손잡이째 화면 밖에 남는다. 끌고 있는 중에는
+     커서와 싸우므로 부르지 않는다. */
+  D.revealSel = function () {
+    var sw = $('#stagewrap'), stage = $('#stage');
+    if (!sw || sw.hidden || !stage) return;
+    var bb = selBBox();
+    if (!bb) return;
+    var k = MM2PX * S.scale, pad = 30;           // 손잡이(⟳ 는 18px 위)까지 여유
+    var sr = stage.getBoundingClientRect(), wr = sw.getBoundingClientRect();
+    var x0 = sr.left + bb.x * k - pad, x1 = sr.left + (bb.x + bb.w) * k + pad;
+    var y0 = sr.top + bb.y * k - pad, y1 = sr.top + (bb.y + bb.h) * k + pad;
+    if (x0 < wr.left) sw.scrollLeft -= wr.left - x0;
+    else if (x1 > wr.right) sw.scrollLeft += x1 - wr.right;
+    if (y0 < wr.top) sw.scrollTop -= wr.top - y0;
+    else if (y1 > wr.bottom) sw.scrollTop += y1 - wr.bottom;
+  };
 
   D.remove = function () {
     if (!S.selIds.length) return;
@@ -521,6 +541,7 @@ window.QL = window.QL || {};
 
     // 입력 중 포커스를 잃지 않도록 캔버스만 다시 그린다
     redrawCanvasOnly();
+    if (p === 'x' || p === 'y' || p === 'w' || p === 'h' || p === 'rot') D.revealSel();
     D.onChange();
   }
 
@@ -894,7 +915,7 @@ window.QL = window.QL || {};
       else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'd') { D.duplicate(); e.preventDefault(); return; }
       else used = false;
       if (used) list.forEach(function (el) { el.x = r2(el.x + dx); el.y = r2(el.y + dy); });
-      if (used) { touch(); e.preventDefault(); redrawCanvasOnly(); drawProps(); D.onChange(); }
+      if (used) { touch(); e.preventDefault(); redrawCanvasOnly(); drawProps(); D.revealSel(); D.onChange(); }
     });
   }
 

@@ -233,11 +233,11 @@
 <div class="scrim" id="scrim" hidden></div>
 <div class="toast" id="toast" hidden></div>
 <div class="busy" id="busy" hidden>
-  <div class="busybox">
+  <div class="busybox" role="status" aria-live="polite">
     <div class="busymsg" id="busyMsg">만드는 중…</div>
-    <div class="busybar" id="busyBar"><i id="busyFill"></i></div>
+    <div class="busybar" id="busyBar" role="progressbar" aria-valuemin="0" aria-valuemax="100"><i id="busyFill"></i></div>
     <div class="busysub" id="busySub"></div>
-    <button type="button" class="btn-s" id="busyCancel" hidden>중단</button>
+    <button type="button" class="btn-s" id="busyCancel" hidden>중단 (Esc)</button>
   </div>
 </div>
 

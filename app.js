@@ -184,20 +184,30 @@ window.QL = window.QL || {};
     return bad;
   }
 
-  function drawWarn(v) {
+  function drawWarn(v, c) {
     var el = $('#dataWarn');
     var msgs = [];
 
     if (S.rows.length && v) {
-      var rows = Object.keys(v.prob).map(function (i) { return +i + 1; });
+      var rows = Object.keys(v.prob).map(function (i) { return +i + 1; }).sort(function (a, b) { return a - b; });
       if (rows.length) {
         var head = rows.slice(0, 8).join(', ') + (rows.length > 8 ? ' 외 ' + (rows.length - 8) + '행' : '');
         msgs.push('바코드 형식 오류 <b>' + rows.length.toLocaleString() + '행</b> — ' + head +
           '<br><span style="opacity:.8">' + QL.esc(v.prob[rows[0] - 1][0]) + '</span>' +
-          (v.truncated ? '<br><span style="opacity:.8">※ ' + v.from.toLocaleString() + '~' +
-            v.to.toLocaleString() + '행까지만 검사했습니다 (한 번에 ' +
-            VALIDATE_MAX.toLocaleString() + '행)</span>' : ''));
+          (v.truncated ? '<br><span style="opacity:.8">※ 앞의 ' + v.checked.toLocaleString() +
+            '장만 검사했습니다 (출력 ' + v.total.toLocaleString() + '장 중 한 번에 ' +
+            VALIDATE_MAX.toLocaleString() + '장)</span>' : ''));
       }
+    }
+
+    /* 한 행의 수량이 상한을 넘으면 말없이 잘리지 않게 알린다 */
+    if (c && c.capCount) {
+      msgs.push('수량이 한 행 <b>' + QTY_MAX.toLocaleString() + '장</b>을 넘어 잘렸습니다 — ' +
+        c.capRows.join(', ') + '행' +
+        (c.capCount > c.capRows.length ? ' 외 ' + (c.capCount - c.capRows.length) + '행' : '') +
+        ', 합계 <b>' + c.capLost.toLocaleString() + '장 제외</b>' +
+        '<br><span style="opacity:.8">그 행을 여러 줄로 나누거나 ' +
+        '<b>전체 반복</b>으로 늘리세요.</span>');
     }
 
     var lint = lintTemplates();
@@ -216,7 +226,7 @@ window.QL = window.QL || {};
     el.innerHTML = msgs.join('<hr style="border:0;border-top:1px solid #fecaca;margin:6px 0">');
   }
 
-  /* ---------- 번호 생성 ----------  /* ---------- 번호 생성 ----------
+  /* ---------- 번호 생성 ----------
      데이터 없이 번호만 찍을 때 쓴다. 별도 모드가 아니라 데이터를 만들어 넣는
      방식이라, 표·검증·조건문·출력 범위 같은 기존 기능이 그대로 적용된다.
      끝 번호가 시작보다 작으면 내려가며 센다. */
@@ -276,6 +286,8 @@ window.QL = window.QL || {};
     return { by: by, from: from, to: to > 0 ? to : Infinity };
   }
 
+  var QTY_MAX = 2000;                            // 한 행이 만들 수 있는 최대 장수
+
   function collectItems() {
     var qi = parseInt($('#colQty').value, 10);
     var rep = Math.max(1, parseInt($('#repeat').value, 10) || 1);
@@ -284,7 +296,8 @@ window.QL = window.QL || {};
     var out = {
       items: [], seqOffset: 0, dup: 0, skip: 0,
       totalLabels: 0, totalRows: 0, usedRows: 0,
-      rowFrom: 0, rowTo: 0, by: sp.by
+      rowFrom: 0, rowTo: 0, by: sp.by,
+      capRows: [], capCount: 0, capLost: 0       // 수량 상한에 걸린 행
     };
 
     if (!S.rows.length) {                        // 데이터 없이 고정 내용만
@@ -309,7 +322,14 @@ window.QL = window.QL || {};
       }
       qty *= rep;
       if (qty < 1) return;
-      if (qty > 2000) qty = 2000;
+      /* 한 행이 수천 장을 차지하면 다른 행이 안 나오므로 상한을 둔다.
+         조용히 자르면 3,000장 주문이 2,000장으로 나가므로 몇 행이 잘렸는지 남긴다. */
+      if (qty > QTY_MAX) {
+        out.capCount++;
+        if (out.capRows.length < 8) out.capRows.push(rowNo);
+        out.capLost += qty - QTY_MAX;
+        qty = QTY_MAX;
+      }
       out.usedRows++;
       out.totalLabels += qty;
 
@@ -337,35 +357,56 @@ window.QL = window.QL || {};
   /* ---------- 데이터 검증 · 표 ---------- */
   var VALIDATE_MAX = 2000, TABLE_MAX = 200, SAMPLE_MAX = 300;
 
-  /* 바코드 요소에 들어갈 값이 그 규격에 맞는지 검사한다.
-     앞에서부터 고정된 만큼이 아니라 "지금 출력할 범위"를 본다.
-     20,000행 중 15,000~15,500행만 뽑는데 1~500행만 검사하면 의미가 없다. */
-  function validateRows(win) {
-    var out = { prob: {}, dupe: {}, count: 0, from: 1, to: 0, truncated: false };
+  /* 바코드 값이 그 규격에 맞는지 검사한다.
+     검사 대상은 "행"이 아니라 실제로 찍힐 "라벨"이다. 한 행을 수량만큼 펼치면
+     {일련번호} 같은 값이 장마다 달라지므로, 행의 첫 장만 보면 놓친다.
+     (예: 88012340000{일련번호} 는 1장째 12자리로 EAN13 통과, 100장째 14자리로 실패)
+     범위도 "지금 출력할 구간"을 따른다 — 15,000행부터 뽑는데 1행부터 검사하면 뜻이 없다. */
+  function validateRows(win, c) {
+    var out = { prob: {}, dupe: {}, count: 0, from: 1, to: 0,
+      truncated: false, checked: 0, total: 0 };
     if (!S.rows.length) return out;
 
+    /* 표에 보여 줄 행 구간 (중복 표시는 행 단위라 여기서 센다) */
     var from = Math.max(1, win && win.from ? win.from : 1);
     var to = Math.min(S.rows.length, win && win.to ? win.to : S.rows.length);
     if (to < from) to = from;
-    var lim = Math.min(to, from + VALIDATE_MAX - 1);
-    out.from = from; out.to = lim; out.truncated = lim < to;
+    var rowLim = Math.min(to, from + VALIDATE_MAX - 1);
+    out.from = from; out.to = rowLim;
 
-    var bcs = S.elements.filter(function (e) { return e.type === 'barcode' && e.tpl; });
-    var seen = {};
-    for (var i = from - 1; i < lim; i++) {
+    var seen = {}, i;
+    for (i = from - 1; i < rowLim; i++) {
       var row = S.rows[i];
       if (!row) continue;
       var joined = row.join('\u0001');
       if (seen[joined]) out.dupe[i] = 1; else seen[joined] = 1;
+    }
 
+    var bcs = S.elements.filter(function (e) { return e.type === 'barcode' && e.tpl; });
+    if (!bcs.length) return out;
+
+    var items = (c && c.items) || [];
+    var off = (c && c.seqOffset) || 0;
+    out.total = items.length;
+    var lim = Math.min(items.length, VALIDATE_MAX);
+    out.checked = lim;
+    out.truncated = lim < items.length;
+
+    for (i = 0; i < lim; i++) {
+      var it = items[i];
+      if (!it.row) continue;                     // 데이터 없이 고정 내용만 찍는 경우
+      var ri = it.rowNo - 1;
       for (var k = 0; k < bcs.length; k++) {
         var el = bcs[k];
-        var v = QL.resolve(el.tpl, row, S.headers, { seq: i + 1, rowNo: i + 1 });
+        var v = QL.resolve(el.tpl, it.row, S.headers, { seq: off + i + 1, rowNo: it.rowNo });
         var msg = null;
         if (!v) msg = (el.name || '바코드') + ' 값이 비어 있음';
         else if (!QL.barcodeValid(v, el.fmt || 'CODE128'))
           msg = (el.name || '바코드') + ' — ' + (el.fmt || 'CODE128') + ' 형식에 맞지 않음: ' + v;
-        if (msg) { (out.prob[i] = out.prob[i] || []).push(msg); out.count++; }
+        if (!msg) continue;
+        var list = out.prob[ri] = out.prob[ri] || [];
+        if (list.indexOf(msg) < 0) list.push(msg);   // 같은 행에서 같은 문제는 한 번만
+        out.count++;
       }
     }
     return out;
@@ -375,7 +416,7 @@ window.QL = window.QL || {};
     var wrap = $('#dataTable');
     if (wrap.hidden) return;
     if (!S.rows.length) { wrap.innerHTML = '<p class="hint" style="padding:8px">데이터가 없습니다.</p>'; return; }
-    v = v || validateRows(win);
+    v = v || validateRows(win, collectItems());
     var from = v.from, to = Math.min(v.to, from + TABLE_MAX - 1);
     var h = '<table class="dt"><thead><tr><th>#</th>' +
       S.headers.map(function (x) { return '<th>' + QL.esc(x) + '</th>'; }).join('') + '</tr></thead><tbody>';
@@ -489,8 +530,8 @@ window.QL = window.QL || {};
     var win = S.rows.length
       ? { from: c.rowFrom || 1, to: c.rowTo || S.rows.length }
       : null;
-    var v = win ? validateRows(win) : null;
-    drawWarn(v);
+    var v = win ? validateRows(win, c) : null;
+    drawWarn(v, c);
     drawTable(v, win);
     fillSampleSelect(win);
     var n = c.items.length;
@@ -577,6 +618,27 @@ window.QL = window.QL || {};
   var SLICE_MS = 50;         // 한 조각이 목표로 하는 시간
   var SHOW_AFTER = 250;      // 이만큼 걸릴 때만 가림막을 띄운다 — 잠깐이면 깜빡여 거슬린다
   var buildToken = 0, buildTimer = null, showTimer = null;
+  var building = false, buildCbs = [];       // 생성이 끝나면 부를 것들 (인쇄 등)
+
+  /* 페이지 하나가 차지하는 세로 길이 (여백 포함) */
+  function pagePitch() {
+    var first = $('#pages').firstElementChild;
+    if (!first || first.className.indexOf('page-wrap') < 0) return 0;
+    return first.offsetHeight + (parseFloat(getComputedStyle(first).marginBottom) || 0);
+  }
+  /* 다시 만들기 전에 보고 있던 페이지 번호 — 끝나면 그 자리로 돌려 놓는다.
+     3,000번째를 보다가 간격을 1mm 고쳤는데 맨 위로 튀면 다시 찾아가야 한다. */
+  function visiblePage() {
+    var pv = $('#pagesview');
+    if (pv.hidden || pv.scrollTop <= 0) return -1;
+    var pitch = pagePitch();
+    return pitch > 0 ? pv.scrollTop / pitch : -1;   // 페이지 안 위치까지 소수로 담는다
+  }
+  function gotoPage(at) {
+    var pitch = pagePitch();
+    if (at <= 0 || pitch <= 0) return;
+    $('#pagesview').scrollTop = at * pitch;
+  }
 
   function prepPages() {
     var o = syncLabelSize();
@@ -608,16 +670,26 @@ window.QL = window.QL || {};
 
   function stopBuild() {
     buildToken++;
+    building = false;
     clearTimeout(buildTimer);
     clearTimeout(showTimer);
     busyCancel(null);
     busy(false);
   }
 
+  /* 끝났을 때 기다리던 쪽에 알린다. 설정이 바뀌어 다시 만들어도 기다림은 이어진다 */
+  function fireBuildCbs() {
+    var cbs = buildCbs; buildCbs = [];
+    cbs.forEach(function (f) { f(); });
+  }
+
   /* 조금씩 만들면서 진행률을 보여 준다. 수천 장이어도 화면이 멈추지 않는다. */
   function buildPreview(cb) {
+    if (cb) buildCbs.push(cb);
     stopBuild();
+    building = true;
     var host = $('#pages');
+    var keepPage = visiblePage();
     /* 바뀐 치수로 옛 페이지를 다시 배치하는 것이 비싸다 — 먼저 비우고 계산한다 */
     if (host.childElementCount > CHUNK_SYNC) host.textContent = '';
     var token = buildToken, r = prepPages(), st = r.st, n = r.n;
@@ -625,8 +697,10 @@ window.QL = window.QL || {};
 
     if (st.total <= CHUNK_SYNC) {
       host.innerHTML = st.step(st.total);
+      building = false;
       donePages(st, n);
-      if (cb) cb();
+      gotoPage(Math.min(keepPage, st.total - 1));
+      fireBuildCbs();
       return;
     }
 
@@ -637,6 +711,8 @@ window.QL = window.QL || {};
       showBuilding(st);
       busyCancel(function () {
         buildToken++;
+        building = false;
+        buildCbs = [];                         // 중단했으면 인쇄도 하지 않는다
         clearTimeout(buildTimer);
         busyCancel(null);
         busy(false);
@@ -649,7 +725,7 @@ window.QL = window.QL || {};
       });
     }, SHOW_AFTER);
 
-    var per = 16;                                  // 한 조각에 붙이는 페이지 수
+    var per = 16, jumped = false;                  // 한 조각에 붙이는 페이지 수
     function tick() {
       if (token !== buildToken) return;            // 설정이 또 바뀌어 버려진 작업
       var t0 = performance.now();
@@ -660,11 +736,17 @@ window.QL = window.QL || {};
       per = Math.max(4, Math.min(400, Math.round(per * (dt > 1 ? SLICE_MS / dt : 2))));
       if (st.done()) {
         clearTimeout(showTimer);
+        building = false;
         busyCancel(null);
         busy(false);
         donePages(st, n);
-        if (cb) cb();
+        if (keepPage > 0) gotoPage(Math.min(keepPage, st.total - 1));
+        fireBuildCbs();
         return;
+      }
+      if (keepPage > 0 && !jumped && st.progress().pages > keepPage + 1) {
+        gotoPage(keepPage);                      // 그 페이지가 생기는 즉시 자리로
+        jumped = true;                           // 끝난 뒤 한 번 더 맞춘다 (그때는 안 잘린다)
       }
       if (shown) showBuilding(st);
       buildTimer = setTimeout(tick, 0);
@@ -684,6 +766,7 @@ window.QL = window.QL || {};
     var r = prepPages();
     $('#pages').innerHTML = r.st.step(r.st.total);
     donePages(r.st, r.n);
+    fireBuildCbs();
   }
 
   /* ---------- 만드는 중 표시 ---------- */
@@ -695,10 +778,14 @@ window.QL = window.QL || {};
     var bar = $('#busyBar');
     if (frac == null) {
       bar.classList.add('idle');
+      bar.removeAttribute('aria-valuenow');
       $('#busyFill').style.width = '';
     } else {
+      var pct = Math.round(Math.max(0, Math.min(1, frac)) * 100);
       bar.classList.remove('idle');
-      $('#busyFill').style.width = Math.max(0, Math.min(1, frac)) * 100 + '%';
+      bar.setAttribute('aria-valuenow', pct);
+      bar.setAttribute('aria-valuetext', pct + '% · ' + (sub || ''));
+      $('#busyFill').style.width = pct + '%';
     }
     el.hidden = false;
   }
@@ -712,6 +799,9 @@ window.QL = window.QL || {};
 
   function ensurePreview(cb) {
     if (!previewDirty) { if (cb) cb(); return; }
+    /* 이미 만드는 중이면 다시 시작하지 않고 끝나기를 기다린다.
+       인쇄 버튼이 setView 와 겹쳐 생성을 두 번 시작하던 문제. */
+    if (building) { if (cb) buildCbs.push(cb); return; }
     buildPreview(cb);
   }
 
@@ -1215,6 +1305,13 @@ window.QL = window.QL || {};
     });
     /* 브라우저가 직접 인쇄를 시작한 경우(네이티브 Ctrl+P 등)에도 내용이 있도록 */
     window.addEventListener('beforeprint', ensurePreviewSync);
+    /* 만드는 중에는 Esc 로 중단. 캔버스 단축키보다 먼저 받아야 한다. */
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape' && cancelFn) {
+        e.preventDefault(); e.stopPropagation();
+        cancelFn();
+      }
+    }, true);
     document.addEventListener('keydown', function (e) {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') {
         e.preventDefault();
