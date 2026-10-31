@@ -209,6 +209,10 @@
     </div>
 
     <div class="pagesview" id="pagesview" hidden>
+      <div class="stale" id="staleBar" hidden>
+        <span>바뀐 설정이 아직 미리보기에 반영되지 않았습니다 — 입력칸에서 <b>Enter</b> 를 누르거나 다른 곳을 누르면 반영됩니다.</span>
+        <button type="button" class="btn-s" id="btnRefresh">지금 반영</button>
+      </div>
       <div id="pages"></div>
     </div>
   </section>
@@ -228,7 +232,14 @@
 
 <div class="scrim" id="scrim" hidden></div>
 <div class="toast" id="toast" hidden></div>
-<div class="busy" id="busy" hidden><span></span></div>
+<div class="busy" id="busy" hidden>
+  <div class="busybox">
+    <div class="busymsg" id="busyMsg">만드는 중…</div>
+    <div class="busybar" id="busyBar"><i id="busyFill"></i></div>
+    <div class="busysub" id="busySub"></div>
+    <button type="button" class="btn-s" id="busyCancel" hidden>중단</button>
+  </div>
+</div>
 
 <script src="vendor/qrcode.min.js"></script>
 <script src="vendor/jsbarcode.min.js"></script>

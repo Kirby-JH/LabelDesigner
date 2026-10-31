@@ -17,7 +17,7 @@ window.QL = window.QL || {};
     label: { w: 60, h: 40 },
     snap: true, scale: 1
   };
-  var workbook = null, previewDirty = true, view = 'design', redrawT = null;
+  var workbook = null, previewDirty = true, view = 'design', redrawT = null, wantCommit = false;
 
   /* 글꼴이 다 도착한 뒤에 인쇄해야 대체 글꼴로 찍히지 않는다 */
   function whenFontsReady(cb) {
@@ -443,26 +443,45 @@ window.QL = window.QL || {};
   function syncLabelSize() {
     var o = paperOpts();
     S.label = { w: o.labelW, h: o.labelH };
-    document.documentElement.style.setProperty('--lw', o.labelW + 'mm');
-    document.documentElement.style.setProperty('--lh', o.labelH + 'mm');
+    /* 디자인 캔버스에만 걸어 둔다 — :root 에 두면 값이 바뀔 때마다
+       미리보기 수천 장까지 스타일을 다시 계산해 한 글자가 400ms 씩 걸린다 */
+    $('#stage').style.setProperty('--lw', o.labelW + 'mm');
+    $('#stage').style.setProperty('--lh', o.labelH + 'mm');
     return o;
   }
 
   /* ---------- 다시 그리기 ---------- */
-  function changed() {
+  /* 설정이 바뀌었을 때.
+     가벼운 일(디자인 화면·장수·인쇄 치수)은 바로 하고, 미리보기 수천 장을 다시
+     만드는 무거운 일은 "입력을 끝냈을 때"만 한다 — 2,000장에서 1.0초,
+     5,000장에서 2.3초씩 멈추므로 숫자 한 글자마다 다시 만들 수는 없다. */
+  function changed() { schedule(true); }
+  function changedLive() { schedule(false); }
+  QL.changed = changed;
+
+  function schedule(commit) {
     previewDirty = true;
+    if (commit) wantCommit = true;
     clearTimeout(redrawT);
     redrawT = setTimeout(function () {
+      var now = wantCommit; wantCommit = false;
       if (QL.usesEmbed(S.elements)) ensureFontCss();
       syncLabelSize();
-      applyZoom();
+      /* 미리보기 화면에서 --s 를 건드리면 이미 있는 수천 장이 다시 배치된다.
+         어차피 뒤처진 화면이니 다시 만들 때 함께 맞춘다. */
+      if (view === 'design') applyZoom();
       QL.D.draw();
       updateStat();
       save();
-      if (view === 'preview') buildPreview();
+      if (now && view === 'preview') buildPreview();
+      else markStale();
     }, 120);
   }
-  QL.changed = changed;
+
+  /* 미리보기가 지금 설정보다 뒤처져 있다고 알린다 */
+  function markStale() {
+    $('#staleBar').hidden = !(previewDirty && view === 'preview');
+  }
 
   function updateStat() {
     var c = collectItems(), o = paperOpts();
@@ -522,6 +541,12 @@ window.QL = window.QL || {};
   }
 
   /* ---------- 확대 ---------- */
+  var lastDs = null, lastS = null;
+  function setVar(el, name, v, keep) {
+    if (keep === v) return v;                      // 같은 값을 다시 쓰면 restyle 만 유발한다
+    el.style.setProperty(name, v);
+    return v;
+  }
   function applyZoom() {
     var z = $('#zoom').value, o = paperOpts(), s;
     if (view === 'design') {
@@ -531,7 +556,7 @@ window.QL = window.QL || {};
       else s = parseFloat(z);
       s = Math.max(0.1, s);
       S.scale = s;
-      document.documentElement.style.setProperty('--ds', s);
+      lastDs = setVar($('#stage'), '--ds', s, lastDs);
       var st = $('#stage');
       st.style.width = (o.labelW * MM2PX * s) + 'px';
       st.style.height = (o.labelH * MM2PX * s) + 'px';
@@ -543,51 +568,151 @@ window.QL = window.QL || {};
       var aw2 = Math.max(80, pv.clientWidth - 52);
       if (z === 'fit') s = Math.min(aw2 / (pw * MM2PX), 2.2);
       else s = parseFloat(z);
-      document.documentElement.style.setProperty('--s', Math.max(0.1, s));
+      lastS = setVar($('#pages'), '--s', Math.max(0.1, s), lastS);
     }
   }
 
   /* ---------- 미리보기 ---------- */
-  function buildPreview() {
+  var CHUNK_SYNC = 120;      // 이 장수까지는 끊지 않고 한 번에 만든다
+  var SLICE_MS = 50;         // 한 조각이 목표로 하는 시간
+  var SHOW_AFTER = 250;      // 이만큼 걸릴 때만 가림막을 띄운다 — 잠깐이면 깜빡여 거슬린다
+  var buildToken = 0, buildTimer = null, showTimer = null;
+
+  function prepPages() {
     var o = syncLabelSize();
     var c = collectItems();
     o.items = c.items;
     o.seqOffset = c.seqOffset;
     o.elements = S.elements;
     o.headers = S.headers;
-    var out = QL.buildPages(o);
-    document.documentElement.style.setProperty('--pw', out.pw + 'mm');
-    document.documentElement.style.setProperty('--ph', out.ph + 'mm');
-    $('#pageRule').textContent = '@page{size:' + out.pw + 'mm ' + out.ph + 'mm;margin:0}';
-    $('#pages').innerHTML = out.html +
-      (out.limited ? '<p class="more">한 번에 ' + QL.MAX_LABELS.toLocaleString() +
-        '장까지만 만듭니다. (선택한 범위 ' + c.items.length.toLocaleString() +
+    var st = QL.pageStepper(o);
+    $('#pages').style.setProperty('--pw', st.pw + 'mm');
+    $('#pages').style.setProperty('--ph', st.ph + 'mm');
+    $('#pageRule').textContent = '@page{size:' + st.pw + 'mm ' + st.ph + 'mm;margin:0}';
+    return { st: st, n: c.items.length };
+  }
+
+  function tailHtml(st, n) {
+    return (st.limited ? '<p class="more">한 번에 ' + QL.MAX_LABELS.toLocaleString() +
+        '장까지만 만듭니다. (선택한 범위 ' + n.toLocaleString() +
         '장) — 위의 <b>출력 범위</b>로 나누어 뽑으세요.</p>' : '') +
-      (c.items.length ? '' : '<p class="more">출력할 라벨이 없습니다.</p>');
+      (n ? '' : '<p class="more">출력할 라벨이 없습니다.</p>');
+  }
+
+  function donePages(st, n) {
+    $('#pages').insertAdjacentHTML('beforeend', tailHtml(st, n));
     previewDirty = false;
+    markStale();
     applyZoom();
   }
-  function busy(msg) {
-    var el = $('#busy');
-    if (!msg) { el.hidden = true; return; }
-    el.firstElementChild.textContent = msg;
-    el.hidden = false;
+
+  function stopBuild() {
+    buildToken++;
+    clearTimeout(buildTimer);
+    clearTimeout(showTimer);
+    busyCancel(null);
+    busy(false);
   }
 
-  /* 인쇄 직전처럼 기다릴 수 없는 자리에서 쓰는 즉시 생성 */
-  function ensurePreviewSync() { if (previewDirty) buildPreview(); }
+  /* 조금씩 만들면서 진행률을 보여 준다. 수천 장이어도 화면이 멈추지 않는다. */
+  function buildPreview(cb) {
+    stopBuild();
+    var host = $('#pages');
+    /* 바뀐 치수로 옛 페이지를 다시 배치하는 것이 비싸다 — 먼저 비우고 계산한다 */
+    if (host.childElementCount > CHUNK_SYNC) host.textContent = '';
+    var token = buildToken, r = prepPages(), st = r.st, n = r.n;
+    applyZoom();
 
-  /* 화면에서 쓰는 생성 — 장수가 많으면 "만드는 중"을 먼저 그려 준다.
-     5,000장이면 QR 생성만 2.5초라 아무 표시가 없으면 멈춘 줄 안다. */
+    if (st.total <= CHUNK_SYNC) {
+      host.innerHTML = st.step(st.total);
+      donePages(st, n);
+      if (cb) cb();
+      return;
+    }
+
+    host.innerHTML = '';
+    var shown = false;
+    showTimer = setTimeout(function () {
+      shown = true;
+      showBuilding(st);
+      busyCancel(function () {
+        buildToken++;
+        clearTimeout(buildTimer);
+        busyCancel(null);
+        busy(false);
+        host.insertAdjacentHTML('beforeend',
+          '<p class="more">중단했습니다 — ' + st.progress().pages.toLocaleString() +
+          ' / ' + st.total.toLocaleString() + '페이지까지만 만들었습니다. ' +
+          '위의 <b>지금 반영</b>으로 다시 만들 수 있습니다.</p>');
+        markStale();
+        applyZoom();
+      });
+    }, SHOW_AFTER);
+
+    var per = 16;                                  // 한 조각에 붙이는 페이지 수
+    function tick() {
+      if (token !== buildToken) return;            // 설정이 또 바뀌어 버려진 작업
+      var t0 = performance.now();
+      host.insertAdjacentHTML('beforeend', st.step(per));
+      host.offsetHeight;                           // 배치 비용까지 이 조각 안에서 치른다
+      var dt = performance.now() - t0;
+      /* 만드는 값보다 붙이고 배치하는 값이 더 크다 — 실제로 걸린 시간을 보고 맞춘다 */
+      per = Math.max(4, Math.min(400, Math.round(per * (dt > 1 ? SLICE_MS / dt : 2))));
+      if (st.done()) {
+        clearTimeout(showTimer);
+        busyCancel(null);
+        busy(false);
+        donePages(st, n);
+        if (cb) cb();
+        return;
+      }
+      if (shown) showBuilding(st);
+      buildTimer = setTimeout(tick, 0);
+    }
+    buildTimer = setTimeout(tick, 30);             // 표시가 먼저 그려지도록 한 박자 늦게
+  }
+
+  function showBuilding(st) {
+    var done = st.progress().pages;
+    busy('라벨 ' + st.shown.toLocaleString() + '장 만드는 중…', done / st.total,
+      done.toLocaleString() + ' / ' + st.total.toLocaleString() + '페이지');
+  }
+
+  /* 끊지 않고 전부 — 인쇄 직전처럼 기다릴 수 없는 자리에서 쓴다 */
+  function buildPreviewSync() {
+    stopBuild();
+    var r = prepPages();
+    $('#pages').innerHTML = r.st.step(r.st.total);
+    donePages(r.st, r.n);
+  }
+
+  /* ---------- 만드는 중 표시 ---------- */
+  function busy(msg, frac, sub) {
+    var el = $('#busy');
+    if (msg === false) { el.hidden = true; return; }
+    $('#busyMsg').textContent = msg;
+    $('#busySub').textContent = sub || '';
+    var bar = $('#busyBar');
+    if (frac == null) {
+      bar.classList.add('idle');
+      $('#busyFill').style.width = '';
+    } else {
+      bar.classList.remove('idle');
+      $('#busyFill').style.width = Math.max(0, Math.min(1, frac)) * 100 + '%';
+    }
+    el.hidden = false;
+  }
+  var cancelFn = null;
+  function busyCancel(fn) {
+    cancelFn = fn;
+    $('#busyCancel').hidden = !fn;
+  }
+
+  function ensurePreviewSync() { if (previewDirty) buildPreviewSync(); }
+
   function ensurePreview(cb) {
     if (!previewDirty) { if (cb) cb(); return; }
-    var n = collectItems().items.length;
-    if (n <= 300) { buildPreview(); if (cb) cb(); return; }
-    busy('라벨 ' + n.toLocaleString() + '장 만드는 중…');
-    setTimeout(function () {
-      try { buildPreview(); } finally { busy(false); }
-      if (cb) cb();
-    }, 40);
+    buildPreview(cb);
   }
 
   function setView(v) {
@@ -597,6 +722,7 @@ window.QL = window.QL || {};
     $('#ctoolbar').hidden = v !== 'design';
     $('#pagesview').hidden = v !== 'preview';
     if (v === 'preview') ensurePreview();
+    else { stopBuild(); markStale(); }
     applyZoom();
   }
 
@@ -802,22 +928,35 @@ window.QL = window.QL || {};
   }
 
   /* ---------- 파일 ---------- */
+  /* 큰 엑셀은 읽고 펼치는 동안 한참 멈춘다 — 표시를 먼저 그린 뒤 일을 시작한다 */
   function readFile(file) {
     $('#fileName').textContent = file.name + ' 읽는 중…';
     var isText = /\.(csv|txt|tsv)$/i.test(file.name);
     var fr = new FileReader();
     fr.onload = function (e) {
+      busy(file.name + ' 읽는 중…');            // 얼마나 남았는지 알 수 없어 흐르는 막대
+      setTimeout(function () { parse(e.target.result); }, 30);
+    };
+    fr.onerror = function () {
+      busy(false);
+      $('#fileName').textContent = '읽기 실패';
+      toast('파일을 읽지 못했습니다.', 'bad');
+    };
+    fr.readAsArrayBuffer(file);
+
+    function parse(buf) {
       try {
         if (isText) {
           workbook = null; $('#sheetWrap').hidden = true;
-          $('#pasteArea').value = decodeText(e.target.result);
+          $('#pasteArea').value = decodeText(buf);
           setTable(parsePasted($('#pasteArea').value));
           $('#fileName').textContent = file.name + ' · ' + S.rows.length + '행';
+          busy(false);
           return;
         }
-        var buf = e.target.result;
         ensureXLSX(function (ok) {
           if (!ok) {
+            busy(false);
             $('#fileName').textContent = '엑셀 파서를 불러오지 못했습니다. vendor/xlsx.full.min.js 를 확인하세요.';
             toast('엑셀 파서를 불러오지 못했습니다. CSV 로 저장하거나 붙여넣기를 쓰세요.', 'bad');
             return;
@@ -836,13 +975,15 @@ window.QL = window.QL || {};
             $('#fileName').textContent = '읽기 실패: ' + err2.message;
             toast('엑셀 파일을 읽지 못했습니다: ' + err2.message, 'bad');
           }
+          busy(false);
         });
       } catch (err) {
+        busy(false);
         $('#fileName').textContent = '읽기 실패: ' + err.message;
       }
-    };
-    fr.readAsArrayBuffer(file);
+    }
   }
+
   function loadSheet() {
     if (!workbook) return;
     var ws = workbook.Sheets[$('#sheetSel').value];
@@ -1046,10 +1187,20 @@ window.QL = window.QL || {};
     ['pageW', 'pageH', 'cols', 'rows', 'sLabelW', 'sLabelH', 'gapX', 'gapY'].forEach(function (id) {
       $('#' + id).addEventListener('input', function () { $('#sheetPreset').value = 'custom'; });
     });
+    /* 직접 적는 칸은 두 단계로 받는다.
+       input  — 치는 동안. 디자인 화면과 장수·치수만 가볍게 고친다.
+       change — 포커스가 옮겨가거나 Enter·화살표를 쓴 순간. 이때 미리보기를 다시 만든다. */
     IDS.forEach(function (id) {
       var el = $('#' + id); if (!el) return;
-      el.addEventListener(el.tagName === 'SELECT' || el.type === 'checkbox' ? 'change' : 'input', changed);
+      if (el.tagName === 'SELECT' || el.type === 'checkbox') {
+        el.addEventListener('change', function () { changed(); });
+      } else {
+        el.addEventListener('input', changedLive);
+        el.addEventListener('change', function () { changed(); });
+      }
     });
+    $('#btnRefresh').addEventListener('click', function () { buildPreview(); });
+    $('#busyCancel').addEventListener('click', function () { if (cancelFn) cancelFn(); });
 
     $('#tplSel').addEventListener('change', function () { if (this.value) libLoad(this.value); });
     $('#btnTplNew').addEventListener('click', libSave);
@@ -1090,7 +1241,7 @@ window.QL = window.QL || {};
     togglePaperMode();
     toggleMargin();
     syncLabelSize();
-    QL.D.init(S, function () { previewDirty = true; save(); updateStat(); });
+    QL.D.init(S, function () { previewDirty = true; save(); updateStat(); markStale(); });
     if (!restored || !S.elements.length) seedDefault();
     if (activeSrc() === 'gen') genRows();
     else if ($('#pasteArea').value.trim()) setTable(parsePasted($('#pasteArea').value));

@@ -211,8 +211,21 @@ table.dt tbody tr.dupe td.n{color:#b45309; font-weight:700}
 /* ---- 만드는 중 표시 ---- */
 .busy{position:fixed; inset:0; z-index:210; display:flex; align-items:center; justify-content:center;
   background:rgba(238,240,243,.72); backdrop-filter:blur(1px)}
-.busy span{background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 22px;
-  font-size:13px; box-shadow:0 6px 24px rgba(0,0,0,.12)}
+.busybox{background:#fff; border:1px solid var(--line); border-radius:10px; padding:14px 18px;
+  min-width:244px; text-align:center; box-shadow:0 6px 24px rgba(0,0,0,.12)}
+.busymsg{font-size:13px}
+.busybar{height:6px; margin:10px 0 6px; border-radius:99px; background:var(--line2); overflow:hidden}
+.busybar i{display:block; height:100%; width:0; border-radius:99px; background:var(--accent);
+  transition:width .12s linear}
+.busybar.idle i{width:40%; animation:busyslide 1s linear infinite}
+@keyframes busyslide{from{transform:translateX(-100%)}to{transform:translateX(250%)}}
+.busysub{font-size:11px; color:var(--muted); min-height:14px}
+#busyCancel{margin-top:8px}
+
+/* ---- 아직 반영되지 않은 설정 알림 ---- */
+.stale{position:sticky; top:0; z-index:5; display:flex; align-items:center; justify-content:center;
+  gap:9px; margin:0 0 8px; padding:6px 10px; border:1px solid #fcd34d; border-radius:8px;
+  background:#fffbeb; color:#92400e; font-size:11.5px}
 
 /* ---- 좁은 화면용 패널 토글 / 가림막 ---- */
 .paneltgl{display:none; padding:5px 9px; font-size:14px; line-height:1}
@@ -253,11 +266,11 @@ table.dt tbody tr.dupe td.n{color:#b45309; font-weight:700}
   .ctoolbar .lbl{display:none}
 }
 @media print{
-  .toast,.scrim,.paneltgl,.busy,.tpop{display:none !important}
+  .toast,.scrim,.paneltgl,.busy,.tpop,.stale{display:none !important}
 }
 
 @media print{
-  :root{--s:1 !important}
+  #pages{--s:1 !important}       /* --s 는 #pages 에 인라인으로 걸려 있다 */
   html,body{height:auto !important; overflow:visible !important; background:#fff; margin:0; padding:0}
 
   /* 인쇄할 때는 #pages 로 가는 길만 남기고 전부 숨긴다. DOM 은 건드리지 않는다.
@@ -270,7 +283,7 @@ table.dt tbody tr.dupe td.n{color:#b45309; font-weight:700}
   .center > *{display:none !important}
   .center > .pagesview{display:contents !important}
 
-  .pgno,.more,.ghost,.toast,.scrim,.paneltgl,.busy{display:none !important}
+  .pgno,.more,.ghost,.toast,.scrim,.paneltgl,.busy,.stale{display:none !important}
   #pages{margin:0 !important; padding:0 !important; font-size:0}
   .page-wrap{margin:0 !important; width:var(--pw); height:var(--ph); break-after:page; page-break-after:always}
   .page-wrap:last-of-type{break-after:auto; page-break-after:auto}

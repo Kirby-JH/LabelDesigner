@@ -610,57 +610,83 @@ window.QL = window.QL || {};
   /* ---------- 페이지 생성 ---------- */
   QL.MAX_LABELS = 5000;
 
-  QL.buildPages = function (o) {
-    var items = o.items, n = items.length, html = [], i;
+  /* 페이지를 조금씩 나누어 만드는 생성기.
+     한 번에 수천 장을 만들면 화면이 1~3초 멈추므로, 호출한 쪽이
+     step() 을 끊어 부르며 진행률을 보여 주고 중간에 그만둘 수 있게 한다. */
+  QL.pageStepper = function (o) {
+    var items = o.items, n = items.length;
     var limited = n > QL.MAX_LABELS;
     var count = limited ? QL.MAX_LABELS : n;
+    var roll = o.mode === 'roll';
+    var swap = o.rot === 90 || o.rot === 270;
+    var pw, ph, total, reported, tf = '', per = 0, start = 0;
 
-    if (o.mode === 'roll') {
-      var pw = o.rot === 90 || o.rot === 270 ? o.labelH : o.labelW;
-      var ph = (o.rot === 90 || o.rot === 270 ? o.labelW : o.labelH) + o.gap;
-      var tf = '';
+    if (roll) {
+      pw = swap ? o.labelH : o.labelW;
+      ph = (swap ? o.labelW : o.labelH) + o.gap;
       if (o.rot === 90) tf = 'translate(' + o.labelH + 'mm,0) rotate(90deg)';
       else if (o.rot === 180) tf = 'translate(' + o.labelW + 'mm,' + o.labelH + 'mm) rotate(180deg)';
       else if (o.rot === 270) tf = 'translate(0,' + o.labelW + 'mm) rotate(270deg)';
-
-      for (i = 0; i < count; i++) {
-        html.push('<div class="page-wrap"><div class="pgno">' + (i + 1) + ' / ' + n + '</div>' +
-          '<div class="page' + (o.border ? ' bordered' : '') + '">' +
-          '<div class="slot" style="left:' + o.offX + 'mm;top:' + o.offY + 'mm;width:' + o.labelW +
-          'mm;height:' + o.labelH + 'mm;' + (tf ? 'transform:' + tf + ';transform-origin:0 0;' : '') + '">' +
-          QL.labelHtml(o.elements, items[i].row, o.headers,
-            { seq: (o.seqOffset || 0) + i + 1, rowNo: items[i].rowNo }) + '</div></div></div>');
-      }
-      return { html: html.join(''), pages: n, pw: pw, ph: ph, limited: limited, shown: count };
+      total = count;
+      reported = n;
+    } else {
+      pw = o.pageW; ph = o.pageH;
+      per = o.cols * o.rows;
+      start = o.startAt % per;
+      total = Math.ceil((count + start) / per);
+      reported = total;
     }
 
-    /* 시트 모드 */
-    var per = o.cols * o.rows;
-    var start = o.startAt % per;
-    var pages = Math.ceil((count + start) / per);
-    var idx = 0;
-    for (var p = 0; p < pages; p++) {
-      html.push('<div class="page-wrap"><div class="pgno">' + (p + 1) + ' / ' + pages + '</div>' +
-        '<div class="page' + (o.border ? ' bordered' : '') + '">');
-      if (o.guide) {
-        for (var g = 0; g < per; g++) {
-          html.push('<div class="ghost" style="left:' + (o.ml + (g % o.cols) * (o.labelW + o.gapX)) +
-            'mm;top:' + (o.mt + Math.floor(g / o.cols) * (o.labelH + o.gapY)) +
-            'mm;width:' + o.labelW + 'mm;height:' + o.labelH + 'mm"></div>');
+    var i = 0, idx = 0;
+    return {
+      total: total, pages: reported, pw: pw, ph: ph, limited: limited, shown: count,
+      done: function () { return i >= total; },
+      /* 진행률 표시용 — 지금까지 만든 페이지 수와 라벨 수 */
+      progress: function () { return { pages: i, labels: roll ? i : idx }; },
+      /* 다음 k 페이지의 HTML. 더 만들 게 없으면 '' */
+      step: function (k) {
+        var html = [], made = 0;
+        while (i < total && made < k) {
+          if (roll) {
+            html.push('<div class="page-wrap"><div class="pgno">' + (i + 1) + ' / ' + n + '</div>' +
+              '<div class="page' + (o.border ? ' bordered' : '') + '">' +
+              '<div class="slot" style="left:' + o.offX + 'mm;top:' + o.offY + 'mm;width:' + o.labelW +
+              'mm;height:' + o.labelH + 'mm;' + (tf ? 'transform:' + tf + ';transform-origin:0 0;' : '') + '">' +
+              QL.labelHtml(o.elements, items[i].row, o.headers,
+                { seq: (o.seqOffset || 0) + i + 1, rowNo: items[i].rowNo }) + '</div></div></div>');
+          } else {
+            html.push('<div class="page-wrap"><div class="pgno">' + (i + 1) + ' / ' + total + '</div>' +
+              '<div class="page' + (o.border ? ' bordered' : '') + '">');
+            if (o.guide) {
+              for (var g = 0; g < per; g++) {
+                html.push('<div class="ghost" style="left:' + (o.ml + (g % o.cols) * (o.labelW + o.gapX)) +
+                  'mm;top:' + (o.mt + Math.floor(g / o.cols) * (o.labelH + o.gapY)) +
+                  'mm;width:' + o.labelW + 'mm;height:' + o.labelH + 'mm"></div>');
+              }
+            }
+            for (var s = (i === 0 ? start : 0); s < per && idx < count; s++) {
+              var x = o.ml + (s % o.cols) * (o.labelW + o.gapX);
+              var y = o.mt + Math.floor(s / o.cols) * (o.labelH + o.gapY);
+              html.push('<div class="slot" style="left:' + x + 'mm;top:' + y + 'mm;width:' + o.labelW +
+                'mm;height:' + o.labelH + 'mm">' +
+                QL.labelHtml(o.elements, items[idx].row, o.headers,
+                  { seq: (o.seqOffset || 0) + idx + 1, rowNo: items[idx].rowNo }) + '</div>');
+              idx++;
+            }
+            html.push('</div></div>');
+          }
+          i++; made++;
         }
+        return html.join('');
       }
-      for (var s = (p === 0 ? start : 0); s < per && idx < count; s++) {
-        var x = o.ml + (s % o.cols) * (o.labelW + o.gapX);
-        var y = o.mt + Math.floor(s / o.cols) * (o.labelH + o.gapY);
-        html.push('<div class="slot" style="left:' + x + 'mm;top:' + y + 'mm;width:' + o.labelW +
-          'mm;height:' + o.labelH + 'mm">' +
-          QL.labelHtml(o.elements, items[idx].row, o.headers,
-            { seq: (o.seqOffset || 0) + idx + 1, rowNo: items[idx].rowNo }) + '</div>');
-        idx++;
-      }
-      html.push('</div></div>');
-    }
-    return { html: html.join(''), pages: pages, pw: o.pageW, ph: o.pageH, limited: limited, shown: count };
+    };
+  };
+
+  /* 한 번에 전부 — 인쇄 직전처럼 끊어 만들 수 없는 자리에서 쓴다 */
+  QL.buildPages = function (o) {
+    var b = QL.pageStepper(o);
+    return { html: b.step(b.total), pages: b.pages, pw: b.pw, ph: b.ph,
+      limited: b.limited, shown: b.shown };
   };
 
 })(window.QL);
